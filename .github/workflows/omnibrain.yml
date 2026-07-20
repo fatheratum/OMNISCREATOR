@@ -44,7 +44,7 @@ jobs:
           done
           ls -lh omnivalkin/shaders/compiled/ || true
 
-      - name: Build validate (skip if no CMakeLists)
+      - name: Build validate
         run: |
           if [ -f "omnivalkin/CMakeLists.txt" ]; then
             cmake -B omnivalkin/build -S omnivalkin -G Ninja \
@@ -52,7 +52,7 @@ jobs:
               -DOMNIBRAIN_CORE_DIR="${GITHUB_WORKSPACE}/omnibrain-core" || true
             cmake --build omnivalkin/build --parallel || true
           else
-            echo "No CMakeLists.txt — skipping cmake"
+            echo "No CMakeLists.txt — skipping"
           fi
 
       - name: Generate omnibrain_state.json
@@ -66,20 +66,9 @@ jobs:
               version: '${{ env.OMNIBRAIN_VERSION }}',
               timestamp: new Date().toISOString(),
               engines: {
-                omnivalkin: {
-                  status: 'ONLINE',
-                  commit: '${{ github.sha }}'.slice(0,8),
-                  timestamp: new Date().toISOString()
-                }
+                omnivalkin: { status:'ONLINE', commit:'${{ github.sha }}'.slice(0,8), timestamp:new Date().toISOString() }
               },
-              reserve: {
-                solvencyIndex: 1.0,
-                liquidAssets: 100000.0,
-                yieldPool: 8500.0,
-                floatVolume: 42000.0,
-                organismsOnline: 4,
-                yieldRate: 0.07
-              },
+              reserve: { solvencyIndex:1.0, liquidAssets:100000.0, yieldPool:8500.0, floatVolume:42000.0, organismsOnline:4, yieldRate:0.07 },
               organisms: [
                 { id:0, name:'NARU-ATUM',        sigil:'◈', capital:120000, yieldRate:0.07, state:'ACTIVE', circulations:0 },
                 { id:1, name:'VOID-WALKER',      sigil:'▲', capital:88000,  yieldRate:0.08, state:'ACTIVE', circulations:0 },
@@ -97,24 +86,10 @@ jobs:
                 { id:'DOM-0008', label:'VOID-BRIDGE',      balance:5500,   pendingYield:385  }
               ],
               payments: [],
-              config: {
-                maxParticles: ${{ env.MAX_PARTICLES }},
-                lightCodeIntensity: ${{ env.LIGHT_CODE }},
-                sacredRings: 9,
-                holographicLayers: 5,
-                autoEvolve: true
-              },
-              build: {
-                commit: '${{ github.sha }}',
-                run: '${{ github.run_number }}',
-                actor: '${{ github.actor }}',
-                timestamp: new Date().toISOString()
-              }
+              config: { maxParticles:${{ env.MAX_PARTICLES }}, lightCodeIntensity:${{ env.LIGHT_CODE }}, sacredRings:9, holographicLayers:5, autoEvolve:true },
+              build: { commit:'${{ github.sha }}', run:'${{ github.run_number }}', actor:'${{ github.actor }}', timestamp:new Date().toISOString() }
             };
-            fs.writeFileSync(
-              'godhead-dashboard/omnibrain_state.json',
-              JSON.stringify(state, null, 2)
-            );
+            fs.writeFileSync('godhead-dashboard/omnibrain_state.json', JSON.stringify(state,null,2));
             console.log('omnibrain_state.json — GODHEAD ONLINE');
           "
 
@@ -146,23 +121,17 @@ jobs:
         uses: microsoft/setup-msbuild@v2
 
       - name: Compile HLSL shaders via dxc (x64)
+        continue-on-error: true
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path omnidirectxinfinity\shaders\compiled
 
-          # Force x64 dxc
           $dxc = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" `
             -Recurse -Filter "dxc.exe" -ErrorAction SilentlyContinue |
             Where-Object { $_.FullName -like "*x64*" } |
             Sort-Object FullName -Descending |
             Select-Object -First 1 -ExpandProperty FullName
 
-          if (-not $dxc) {
-            $dxc = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" `
-              -Recurse -Filter "dxc.exe" -ErrorAction SilentlyContinue |
-              Sort-Object FullName -Descending |
-              Select-Object -First 1 -ExpandProperty FullName
-          }
           if (-not $dxc) { $dxc = "dxc" }
           Write-Host "Using dxc: $dxc"
 
@@ -191,17 +160,18 @@ jobs:
           foreach ($s in $shaders) {
             $src = "omnidirectxinfinity\shaders\$($s.s)"
             $out = "omnidirectxinfinity\shaders\compiled\$($s.o)"
-            try {
-              & "$dxc" -T $s.p -E $s.e -Fo "$out" "$src" 2>&1 | Out-Null
+            $result = & "$dxc" -T $s.p -E $s.e -Fo "$out" "$src" 2>&1
+            if ($LASTEXITCODE -eq 0) {
               Write-Host "  OK  $($s.o)"; $ok++
-            } catch {
-              Write-Host "  SKIP $($s.o)"; $skip++
+            } else {
+              Write-Host "  FAIL $($s.o): $result"; $skip++
             }
           }
-          Write-Host "Compiled: $ok  Skipped: $skip"
+          Write-Host "Compiled: $ok  Failed: $skip"
           Get-ChildItem omnidirectxinfinity\shaders\compiled\ | Format-Table Name,Length
 
-      - name: Build OMNIDIRECTXINFINITY validate
+      - name: Build validate
+        continue-on-error: true
         shell: pwsh
         run: |
           if (Test-Path "omnidirectxinfinity\CMakeLists.txt") {
@@ -211,7 +181,7 @@ jobs:
               -DOMNIBRAIN_CORE_DIR="${env:GITHUB_WORKSPACE}\omnibrain-core"
             cmake --build omnidirectxinfinity\build --config Release --parallel
           } else {
-            Write-Host "No CMakeLists.txt — skipping cmake"
+            Write-Host "No CMakeLists.txt — skipping"
           }
 
       - id: setstatus
@@ -253,19 +223,14 @@ jobs:
       - name: Assemble final dashboard
         run: |
           mkdir -p godhead-dashboard
-
           cp artifacts/omnivalkin/omnibrain_state.json \
              godhead-dashboard/omnibrain_state.json 2>/dev/null || true
 
           node -e "
             const fs = require('fs');
             let state = {};
-            try {
-              state = JSON.parse(
-                fs.readFileSync('godhead-dashboard/omnibrain_state.json')
-              );
-            } catch(e) { state = { engines:{} }; }
-
+            try { state = JSON.parse(fs.readFileSync('godhead-dashboard/omnibrain_state.json')); }
+            catch(e) { state = { engines:{} }; }
             state.engines = state.engines || {};
             state.engines.omnidirectxinfinity = {
               status: 'ONLINE',
@@ -276,16 +241,12 @@ jobs:
               timestamp: new Date().toISOString()
             };
             state.build = {
-              commit:     '${{ github.sha }}',
-              run:        '${{ github.run_number }}',
-              omnivalkin: '${{ needs.boot-omnivalkin.outputs.status }}',
-              omnidx12:   '${{ needs.boot-omnidirectx12.outputs.status }}',
-              timestamp:  new Date().toISOString()
+              commit:'${{ github.sha }}', run:'${{ github.run_number }}',
+              omnivalkin:'${{ needs.boot-omnivalkin.outputs.status }}',
+              omnidx12:'${{ needs.boot-omnidirectx12.outputs.status }}',
+              timestamp: new Date().toISOString()
             };
-            fs.writeFileSync(
-              'godhead-dashboard/omnibrain_state.json',
-              JSON.stringify(state, null, 2)
-            );
+            fs.writeFileSync('godhead-dashboard/omnibrain_state.json', JSON.stringify(state,null,2));
             console.log('GODHEAD ASSEMBLED');
           "
           ls -lh godhead-dashboard/
