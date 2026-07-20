@@ -42,10 +42,9 @@ jobs:
               omnivalkin/shaders/lightcode_compute.comp \
               -o omnivalkin/shaders/compiled/lightcode_pass${pass}.spv || true
           done
-          echo "=== SPIR-V ==="
           ls -lh omnivalkin/shaders/compiled/ || true
 
-      - name: Build omnivalkin validate (skip if no CMakeLists)
+      - name: Build validate (skip if no CMakeLists)
         run: |
           if [ -f "omnivalkin/CMakeLists.txt" ]; then
             cmake -B omnivalkin/build -S omnivalkin -G Ninja \
@@ -53,7 +52,7 @@ jobs:
               -DOMNIBRAIN_CORE_DIR="${GITHUB_WORKSPACE}/omnibrain-core" || true
             cmake --build omnivalkin/build --parallel || true
           else
-            echo "omnivalkin/CMakeLists.txt not found — skipping cmake"
+            echo "No CMakeLists.txt — skipping cmake"
           fi
 
       - name: Generate omnibrain_state.json
@@ -70,9 +69,6 @@ jobs:
                 omnivalkin: {
                   status: 'ONLINE',
                   commit: '${{ github.sha }}'.slice(0,8),
-                  spirv: fs.existsSync('omnivalkin/shaders/compiled')
-                    ? fs.readdirSync('omnivalkin/shaders/compiled')
-                    : [],
                   timestamp: new Date().toISOString()
                 }
               },
@@ -149,16 +145,24 @@ jobs:
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
-      - name: Compile HLSL shaders via dxc
+      - name: Compile HLSL shaders via dxc (x64)
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path omnidirectxinfinity\shaders\compiled
 
+          # Force x64 dxc
           $dxc = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" `
             -Recurse -Filter "dxc.exe" -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -like "*x64*" } |
             Sort-Object FullName -Descending |
             Select-Object -First 1 -ExpandProperty FullName
 
+          if (-not $dxc) {
+            $dxc = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" `
+              -Recurse -Filter "dxc.exe" -ErrorAction SilentlyContinue |
+              Sort-Object FullName -Descending |
+              Select-Object -First 1 -ExpandProperty FullName
+          }
           if (-not $dxc) { $dxc = "dxc" }
           Write-Host "Using dxc: $dxc"
 
@@ -188,13 +192,14 @@ jobs:
             $src = "omnidirectxinfinity\shaders\$($s.s)"
             $out = "omnidirectxinfinity\shaders\compiled\$($s.o)"
             try {
-              & "$dxc" -T $s.p -E $s.e -Fo $out $src 2>&1 | Out-Null
+              & "$dxc" -T $s.p -E $s.e -Fo "$out" "$src" 2>&1 | Out-Null
               Write-Host "  OK  $($s.o)"; $ok++
             } catch {
               Write-Host "  SKIP $($s.o)"; $skip++
             }
           }
           Write-Host "Compiled: $ok  Skipped: $skip"
+          Get-ChildItem omnidirectxinfinity\shaders\compiled\ | Format-Table Name,Length
 
       - name: Build OMNIDIRECTXINFINITY validate
         shell: pwsh
@@ -206,7 +211,7 @@ jobs:
               -DOMNIBRAIN_CORE_DIR="${env:GITHUB_WORKSPACE}\omnibrain-core"
             cmake --build omnidirectxinfinity\build --config Release --parallel
           } else {
-            Write-Host "No CMakeLists.txt — skipping cmake (shaders already compiled)"
+            Write-Host "No CMakeLists.txt — skipping cmake"
           }
 
       - id: setstatus
@@ -214,9 +219,10 @@ jobs:
         run: echo "val=ONLINE" >> $env:GITHUB_OUTPUT
 
       - uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: omnidx12-artifact
-          path: omnidirectxinfinity/shaders/compiled/
+          path: omnidirectxinfinity\shaders\compiled\
           if-no-files-found: warn
           retention-days: 7
 
@@ -227,6 +233,7 @@ jobs:
     name: "◈ BUILD GODHEAD DASHBOARD"
     runs-on: ubuntu-latest
     needs: [boot-omnivalkin, boot-omnidirectx12]
+    if: always()
 
     steps:
       - uses: actions/checkout@v4
@@ -247,11 +254,6 @@ jobs:
         run: |
           mkdir -p godhead-dashboard
 
-          # Copy dashboard source
-          cp godhead-dashboard/index.html  godhead-dashboard/index.html  2>/dev/null || true
-          cp godhead-dashboard/omnisurf.js godhead-dashboard/omnisurf.js 2>/dev/null || true
-
-          # Use state from Vulkan job
           cp artifacts/omnivalkin/omnibrain_state.json \
              godhead-dashboard/omnibrain_state.json 2>/dev/null || true
 
@@ -274,20 +276,18 @@ jobs:
               timestamp: new Date().toISOString()
             };
             state.build = {
-              commit:    '${{ github.sha }}',
-              run:       '${{ github.run_number }}',
-              omnivalkin:'${{ needs.boot-omnivalkin.outputs.status }}',
-              omnidx12:  '${{ needs.boot-omnidirectx12.outputs.status }}',
-              timestamp: new Date().toISOString()
+              commit:     '${{ github.sha }}',
+              run:        '${{ github.run_number }}',
+              omnivalkin: '${{ needs.boot-omnivalkin.outputs.status }}',
+              omnidx12:   '${{ needs.boot-omnidirectx12.outputs.status }}',
+              timestamp:  new Date().toISOString()
             };
             fs.writeFileSync(
               'godhead-dashboard/omnibrain_state.json',
               JSON.stringify(state, null, 2)
             );
-            console.log('GODHEAD ASSEMBLED — BOTH ENGINES ONLINE');
+            console.log('GODHEAD ASSEMBLED');
           "
-
-          echo "=== FINAL DASHBOARD ==="
           ls -lh godhead-dashboard/
 
       - uses: actions/upload-artifact@v4
@@ -297,7 +297,7 @@ jobs:
           retention-days: 30
 
 # ------------------------------------------------------------------------------
-# JOB 4 — DEPLOY TO GITHUB PAGES (OMNISURF)
+# JOB 4 — DEPLOY TO GITHUB PAGES
 # ------------------------------------------------------------------------------
   deploy-omniserver:
     name: "🌐 OMNISURF — GitHub Pages"
@@ -335,6 +335,4 @@ jobs:
           echo "================================================"
           echo "  https://fatheratum.github.io/OMNISCREATOR/"
           echo "  BUILD #${{ github.run_number }}"
-          echo "  OMNIVALKIN:    ${{ needs.boot-omnivalkin.outputs.status }}"
-          echo "  OMNIDIRECTX12: ${{ needs.boot-omnidirectx12.outputs.status }}"
           echo "================================================"
