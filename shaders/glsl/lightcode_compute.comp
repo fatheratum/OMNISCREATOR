@@ -1,0 +1,274 @@
+// ============================================================================
+// lightcode_compute.comp
+// OMNIVALKIN — Vulkan GLSL Compute Shader
+// Light-code particle emit + update | Float-Gen node/path evolution
+// GLSL 4.60 / Vulkan 1.2 | Workgroup 64x1x1
+// OMNIBRAIN INFINITY Universe | Naru Atum Protocol
+// ============================================================================
+#version 460
+#extension GL_ARB_separate_shader_objects : enable
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+// ============================================================================
+// STRUCTS
+// ============================================================================
+
+struct LightCodeParticle {
+    vec3  position;
+    float pad0;
+    vec3  velocity;
+    float pad1;
+    vec4  color;
+    float size;
+    float life;
+    float maxLife;
+    uint  type;
+    uint  active;
+    float pad2;
+    float pad3;
+    float pad4;
+};
+
+struct FloatGenNode {
+    vec3  position;
+    float pad0;
+    vec3  forceVector;
+    float value;
+    float flow;
+    uint  state;
+    float pad1;
+    float pad2;
+};
+
+struct FloatGenPath {
+    uint  nodeA;
+    uint  nodeB;
+    float bandwidth;
+    float currentFlow;
+    uint  active;
+    float particleT;
+    float particleSpeed;
+    float pad;
+};
+
+struct SphereState {
+    float simTime;
+    float coreGlow;
+    float coreScale;
+    float yieldRate;
+    float solvencyIndex;
+    float liquidAssets;
+    float particleEmitRate;
+    uint  frameIndex;
+};
+
+struct EmitCmd {
+    vec3  origin;
+    uint  count;
+    vec4  color;
+    uint  type;
+    vec3  pad;
+};
+
+// ============================================================================
+// BINDINGS
+// ============================================================================
+
+layout(set=0, binding=0) buffer ParticleBuffer {
+    LightCodeParticle particles[];
+};
+layout(set=0, binding=1) buffer DeadList {
+    uint deadSlots[];
+};
+layout(set=0, binding=2) buffer DeadCount {
+    uint deadCount;
+};
+layout(set=0, binding=3, std140) uniform StateUBO {
+    SphereState state;
+};
+layout(set=0, binding=4) buffer EmitCommands {
+    EmitCmd emitCmds[];
+};
+layout(set=0, binding=5) buffer EmitCountBuf {
+    uint emitCount;
+    uint pad0; uint pad1; uint pad2;
+};
+layout(set=0, binding=6) buffer FGNodeBuffer {
+    FloatGenNode fgNodes[];
+};
+layout(set=0, binding=7) buffer FGPathBuffer {
+    FloatGenPath fgPaths[];
+};
+
+// ============================================================================
+// PCG RANDOM
+// ============================================================================
+uint pcg(uint s) {
+    uint st = s * 747796405u + 2891336453u;
+    uint w  = ((st >> ((st >> 28u) + 4u)) ^ st) * 277803737u;
+    return (w >> 22u) ^ w;
+}
+float randF(inout uint seed) {
+    seed = pcg(seed);
+    return float(seed) / float(0xFFFFFFFFu);
+}
+vec3 randDir(inout uint seed) {
+    float phi_v = randF(seed) * 6.28318530f;
+    float cost  = randF(seed) * 2.0 - 1.0;
+    float sint  = sqrt(max(0.0, 1.0 - cost * cost));
+    return vec3(sint * cos(phi_v), cost, sint * sin(phi_v));
+}
+
+// ============================================================================
+// GOLDEN COLOR
+// ============================================================================
+vec3 goldenColor(float t) {
+    return vec3(1.0,
+                0.78 + 0.18 * (1.0 - t),
+                0.05 + 0.15 * (1.0 - t) * (1.0 - t));
+}
+
+// ============================================================================
+// PASS 0 — CS_EmitParticles
+// ============================================================================
+void emitParticles(uint idx) {
+    if (idx >= emitCount) return;
+    EmitCmd cmd = emitCmds[idx % max(emitCount, 1u)];
+
+    // Claim dead slot
+    uint slot = atomicAdd(deadCount, uint(-1));
+    if (slot == 0u || slot > particles.length()) return;
+    uint pidx = deadSlots[slot - 1u];
+
+    uint seed = pcg(idx ^ (state.frameIndex * 1234567u));
+    vec3 dir  = randDir(seed);
+    float spd = 0.5 + randF(seed) * 2.5;
+
+    vec3 origin = cmd.origin;
+    if (length(origin) < 1e-6) origin = vec3(0,1,0);
+
+    vec3 vel = normalize(origin) * spd + randDir(seed) * 0.3;
+
+    float t_c = randF(seed);
+    vec3  gc  = goldenColor(t_c) * cmd.color.rgb;
+
+    LightCodeParticle p;
+    p.position = origin;
+    p.pad0     = 0.0;
+    p.velocity = vel;
+    p.pad1     = 0.0;
+    p.color    = vec4(gc, 0.9);
+    p.size     = 0.02 + randF(seed) * 0.06;
+    p.maxLife  = 0.8  + randF(seed) * 2.2;
+    p.life     = p.maxLife;
+    p.type     = cmd.type;
+    p.active   = 1u;
+    p.pad2 = p.pad3 = p.pad4 = 0.0;
+
+    particles[pidx] = p;
+}
+
+// ============================================================================
+// PASS 1 — CS_UpdateParticles
+// ============================================================================
+void updateParticle(uint idx) {
+    if (idx >= particles.length()) return;
+    LightCodeParticle p = particles[idx];
+    if (p.active == 0u) return;
+
+    float dt = 1.0 / 60.0;
+
+    p.position  += p.velocity * dt;
+    p.life      -= dt;
+    float t      = clamp(p.life / max(p.maxLife, 1e-6), 0.0, 1.0);
+    p.color.a    = t * 0.9;
+    p.color.g    = max(0.0, p.color.g - dt * 0.05);
+    p.color.b    = min(1.0, p.color.b + dt * 0.10);
+    p.size       = max(0.005, p.size - dt * 0.01);
+    p.velocity  *= (1.0 - 0.03 * dt * 60.0);
+
+    // Sacred geometry spiral
+    if (p.type == 2u) {
+        float ang    = state.simTime * 0.5 + float(idx) * 0.01;
+        vec3  spiral = vec3(cos(ang), 0.0, sin(ang)) * 0.05;
+        p.velocity  += spiral * dt;
+    }
+
+    if (p.life <= 0.0 || p.color.a < 0.01) {
+        p.active     = 0u;
+        uint slot    = atomicAdd(deadCount, 1u);
+        deadSlots[slot] = idx;
+    }
+
+    particles[idx] = p;
+}
+
+// ============================================================================
+// PASS 2 — CS_EvolveFloatGenNodes
+// ============================================================================
+void evolveFGNode(uint idx) {
+    if (idx >= fgNodes.length()) return;
+    FloatGenNode node = fgNodes[idx];
+
+    float dt = 1.0 / 60.0;
+    float t  = state.simTime;
+
+    node.value += sin(t * 0.5 + float(idx) * 0.3) * 10.0;
+
+    node.forceVector.x += cos(t * 1.61803 + float(idx)) * 0.01;
+    node.forceVector.y += sin(t * 0.7     + float(idx) * 0.5) * 0.01;
+    node.forceVector.z += cos(t * 1.1     + float(idx) * 0.7) * 0.01;
+
+    float fLen = length(node.forceVector);
+    if (fLen > 2.0) node.forceVector = normalize(node.forceVector) * 2.0;
+
+    if (node.state == 2u) node.state = 1u;
+    else if (node.state == 1u && node.flow < 0.01) node.state = 0u;
+    node.flow *= (1.0 - 0.01 * dt * 60.0);
+
+    fgNodes[idx] = node;
+}
+
+// ============================================================================
+// PASS 3 — CS_EvolveFloatGenPaths
+// ============================================================================
+void evolveFGPath(uint idx) {
+    if (idx >= fgPaths.length()) return;
+    FloatGenPath path = fgPaths[idx];
+
+    float dt = 1.0 / 60.0;
+
+    if (path.active == 1u) {
+        path.particleT += path.particleSpeed * dt;
+        if (path.particleT >= 1.0) {
+            path.particleT    = 0.0;
+            path.currentFlow *= 0.95;
+            if (path.currentFlow < 0.001) path.active = 0u;
+        }
+    }
+
+    // Stochastic activation
+    uint seed = pcg(idx ^ state.frameIndex);
+    float r   = float(seed) / float(0xFFFFFFFFu);
+    if (r < 0.0003) {
+        path.active       = 1u;
+        path.currentFlow  = 500.0 + r * 5000.0;
+        path.particleT    = 0.0;
+    }
+
+    fgPaths[idx] = path;
+}
+
+// ============================================================================
+// MAIN — dispatch selector via specialization constant
+// ============================================================================
+layout(constant_id = 0) const uint PASS = 0u;
+// 0=emit  1=update  2=evolveNodes  3=evolvePaths
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if      (PASS == 0u) emitParticles(idx);
+    else if (PASS == 1u) updateParticle(idx);
+    else if (PASS == 2u) evolveFGNode(idx);
+    else if (PASS == 3u) evolveFGPath(idx);
+}
