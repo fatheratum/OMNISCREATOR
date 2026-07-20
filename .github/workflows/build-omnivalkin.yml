@@ -1,0 +1,23 @@
+name: Build OMNIVALKIN (Vulkan)
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  build-vulkan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Vulkan SDK
+        run: |
+          wget -qO- https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo tee /etc/apt/trusted.gpg.d/lunarg.asc
+          sudo apt-get update && sudo apt-get install -y vulkan-sdk glslc cmake ninja-build
+      - name: Configure CMake
+        run: cmake -B build -S omnivalkin -G Ninja
+      - name: Build
+        run: cmake --build build --target OMNIVALKIN -j 4
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OMNIVALKIN-Release
+          path: build/OMNIVALKIN

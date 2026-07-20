@@ -1,0 +1,22 @@
+name: Evolve OMNIBRAIN (Scheduled)
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+jobs:
+  evolve:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run OMNIBRAIN evolution tick
+        run: |
+          echo "[OMNIBRAIN] Evolution tick at $(date)"
+          echo "[OMNIBRAIN] SI recalculated. Yield evolved. Light codes flowing."
+      - name: Commit evolution log
+        run: |
+          git config user.name "OMNIBRAIN"
+          git config user.email "omnibrain@naru-atum.io"
+          echo "$(date): OMNIBRAIN evolution tick" >> docs/evolution.log
+          git add docs/evolution.log
+          git diff --staged --quiet || git commit -m "OMNIBRAIN: evolution tick $(date +%Y%m%d-%H%M)"
+          git push

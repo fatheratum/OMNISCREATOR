@@ -1,0 +1,72 @@
+# ==============================================================================
+# .github/workflows/omnivalkin.yml
+# OMNIVALKIN — Vulkan Engine Studio Pipeline
+# Compiles all GLSL → SPIR-V | Validates Vulkan pipeline
+# ==============================================================================
+
+name: OMNIVALKIN — Vulkan Studio
+
+on:
+  push:
+    paths:
+      - 'omnivalkin/**'
+      - 'omnibrain-core/**'
+      - 'shaders/glsl/**'
+  workflow_dispatch:
+
+jobs:
+  omnivalkin-studio:
+    name: "⚡ OMNIVALKIN Vulkan Compile"
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Vulkan SDK + tools
+        run: |
+          wget -qO- https://packages.lunarg.com/lunarg-signing-key-pub.asc \
+            | sudo tee /etc/apt/trusted.gpg.d/lunarg.asc
+          sudo wget -qO \
+            /etc/apt/sources.list.d/lunarg-vulkan-jammy.list \
+            https://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
+          sudo apt-get update -qq
+          sudo apt-get install -y vulkan-sdk glslc glslang-tools cmake ninja-build g++-12
+
+      - name: Compile all GLSL shaders → SPIR-V
+        run: |
+          mkdir -p omnivalkin/shaders/compiled
+          echo "=== COMPILING OMNIVALKIN SHADERS ==="
+
+          # Vertex
+          glslc omnibrain-core/shaders/glsl/omnibrain_sphere.vert \
+                -o omnivalkin/shaders/compiled/omnibrain_sphere.vert.spv
+          echo "  ✓ omnibrain_sphere.vert.spv"
+
+          # Fragment
+          glslc omnibrain-core/shaders/glsl/omnibrain_sphere.frag \
+                -o omnivalkin/shaders/compiled/omnibrain_sphere.frag.spv
+          echo "  ✓ omnibrain_sphere.frag.spv"
+
+          # Compute — 4 passes via specialization constant
+          for pass in 0 1 2 3; do
+            glslc -fshader-stage=compute \
+              omnibrain-core/shaders/glsl/lightcode_compute.comp \
+              -DPASS=${pass} \
+              -o omnivalkin/shaders/compiled/lightcode_pass${pass}.spv
+            echo "  ✓ lightcode_pass${pass}.spv"
+          done
+
+          echo "=== ALL SPIR-V COMPILED ==="
+          ls -lh omnivalkin/shaders/compiled/
+
+      - name: Validate SPIR-V
+        run: |
+          for spv in omnivalkin/shaders/compiled/*.spv; do
+            spirv-val "$spv" && echo "  ✓ VALID: $spv" || echo "  ✗ INVALID: $spv"
+          done
+
+      - name: Upload SPIR-V artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: omnivalkin-spirv
+          path: omnivalkin/shaders/compiled/

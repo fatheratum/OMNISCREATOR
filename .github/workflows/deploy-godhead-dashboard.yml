@@ -1,0 +1,27 @@
+name: Deploy Godhead Dashboard
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'godhead-dashboard/**'
+      - 'omnibrain-core/omnibrain.js'
+  workflow_dispatch:
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Copy omnibrain.js into dashboard
+        run: cp omnibrain-core/omnibrain.js godhead-dashboard/omnibrain.js
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: godhead-dashboard
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v4
