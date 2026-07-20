@@ -1,27 +1,42 @@
 name: Deploy Godhead Dashboard
+
 on:
   push:
     branches: [main]
     paths:
       - 'godhead-dashboard/**'
-      - 'omnibrain-core/omnibrain.js'
+      - 'omnibrain-core/**'
   workflow_dispatch:
+
 jobs:
   deploy:
+    name: Deploy to GitHub Pages
     runs-on: ubuntu-latest
+
     permissions:
-      contents: read
+      contents: write
       pages: write
       id-token: write
+
     steps:
       - uses: actions/checkout@v4
-      - name: Copy omnibrain.js into dashboard
-        run: cp omnibrain-core/omnibrain.js godhead-dashboard/omnibrain.js
-      - name: Setup Pages
-        uses: actions/configure-pages@v4
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: godhead-dashboard
+
+      - name: Verify dashboard files
+        run: |
+          echo "=== DASHBOARD FILES ==="
+          ls -lh godhead-dashboard/
+
       - name: Deploy to GitHub Pages
-        uses: actions/deploy-pages@v4
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./godhead-dashboard
+          publish_branch: gh-pages
+          force_orphan: true
+          commit_message: "OMNISURF DEPLOY — GODHEAD LIVE"
+
+      - name: Print live URL
+        run: |
+          echo "================================================"
+          echo "  LIVE: https://fatheratum.github.io/OMNISCREATOR/"
+          echo "================================================"
