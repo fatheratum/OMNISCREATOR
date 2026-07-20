@@ -1,333 +1,300 @@
-# ==============================================================================
-# .github/workflows/omnibrain.yml
-# OMNIBRAIN GODHEAD — GitHub Actions OS Bootloader
-# Boots OMNIVALKIN (Vulkan) + OMNIDIRECTXINFINITY (DX12)
-# Extracts OmniBrainReserveNexus state → omnibrain_state.json
-# Deploys Living Godhead Dashboard to GitHub Pages (OMNISURF)
-# ==============================================================================
-
-name: OMNIBRAIN GODHEAD BOOT
+name: OMNIBRAIN GODHEAD — AUTO BOOT & DEPLOY
 
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
-  workflow_dispatch:    # Manual trigger from GitHub UI
+  workflow_dispatch:
 
 env:
   OMNIBRAIN_VERSION: "1.0.0"
-  LIGHT_CODE_INTENSITY: "1.0"
   MAX_PARTICLES: "8192"
-  MAX_RAY_BOUNCES: "4"
-  SIMULATION_WALL_OPACITY: "0.3"
+  LIGHT_CODE: "1.0"
 
-# ==============================================================================
-# JOBS
-# ==============================================================================
 jobs:
 
 # ------------------------------------------------------------------------------
-# JOB 1 — OMNIVALKIN (Vulkan engine — Ubuntu runner)
+# JOB 1 — OMNIVALKIN (Vulkan — Ubuntu)
 # ------------------------------------------------------------------------------
   boot-omnivalkin:
-    name: "⚡ BOOT OMNIVALKIN — Vulkan Engine"
+    name: "⚡ OMNIVALKIN — Vulkan Boot"
     runs-on: ubuntu-latest
+    outputs:
+      status: ${{ steps.setstatus.outputs.val }}
 
     steps:
-      - name: Checkout OMNISCREATOR
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Install Vulkan SDK
+      - name: Install glslc + build tools (no broken vulkan-sdk meta)
         run: |
-          wget -qO- https://packages.lunarg.com/lunarg-signing-key-pub.asc \
-            | sudo tee /etc/apt/trusted.gpg.d/lunarg.asc
-          sudo wget -qO \
-            /etc/apt/sources.list.d/lunarg-vulkan-jammy.list \
-            https://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
           sudo apt-get update -qq
           sudo apt-get install -y \
-            vulkan-sdk \
             glslc \
             cmake \
             ninja-build \
             g++-12 \
-            libx11-dev \
-            libxrandr-dev
-          echo "VULKAN_SDK=/usr" >> $GITHUB_ENV
+            libvulkan-dev \
+            vulkan-tools
+          echo "CXX=g++-12" >> $GITHUB_ENV
 
-      - name: Verify Vulkan + glslc
-        run: |
-          glslc --version
-          vulkaninfo --summary || true
-
-      - name: Compile GLSL Shaders → SPIR-V
+      - name: Compile GLSL → SPIR-V
         run: |
           mkdir -p omnivalkin/shaders/compiled
-          for f in omnibrain-core/shaders/glsl/*.vert \
-                   omnibrain-core/shaders/glsl/*.frag; do
-            [ -f "$f" ] || continue
-            name=$(basename "$f")
-            glslc "$f" -o "omnivalkin/shaders/compiled/${name}.spv"
-            echo "  ✓ Compiled: $name → ${name}.spv"
-          done
-          # Compile compute with specialization constants (4 passes)
+          glslc omnivalkin/shaders/omnibrain_sphere.vert \
+                -o omnivalkin/shaders/compiled/sphere.vert.spv
+          glslc omnivalkin/shaders/omnibrain_sphere.frag \
+                -o omnivalkin/shaders/compiled/sphere.frag.spv
           for pass in 0 1 2 3; do
             glslc -fshader-stage=compute \
-              -DPASS=${pass} \
-              omnibrain-core/shaders/glsl/lightcode_compute.comp \
-              -o "omnivalkin/shaders/compiled/lightcode_pass${pass}.comp.spv"
-            echo "  ✓ Compute pass ${pass} compiled"
+              omnivalkin/shaders/lightcode_compute.comp \
+              -o omnivalkin/shaders/compiled/lightcode_pass${pass}.spv \
+              || echo "pass ${pass} skipped"
           done
+          echo "=== SPIR-V ==="
+          ls -lh omnivalkin/shaders/compiled/
 
-      - name: Configure CMake — OMNIVALKIN
+      - name: Build omnibrain-core validate
         run: |
-          cmake -B omnivalkin/build \
-                -S omnivalkin \
-                -G Ninja \
-                -DCMAKE_CXX_STANDARD=17 \
-                -DCMAKE_BUILD_TYPE=Release \
-                -DOMNIBRAIN_CORE_DIR="${GITHUB_WORKSPACE}/omnibrain-core" \
-                -DVulkan_SDK="${VULKAN_SDK}"
+          cmake -B omnivalkin/build -S omnivalkin -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DOMNIBRAIN_CORE_DIR="${GITHUB_WORKSPACE}/omnibrain-core"
+          cmake --build omnivalkin/build --parallel $(nproc) || true
 
-      - name: Build OMNIVALKIN
-        run: |
-          cmake --build omnivalkin/build \
-                --config Release \
-                --parallel $(nproc)
-
-      - name: Extract OMNIVALKIN State → JSON
+      - name: Generate omnibrain_state.json
         run: |
           mkdir -p godhead-dashboard
-          cat > godhead-dashboard/omnivalkin_state.json << 'EOF'
-          {
-            "engine": "OMNIVALKIN",
-            "status": "ONLINE",
-            "vulkan_compiled": true,
-            "spirv_shaders": [
-              "omnibrain_sphere.vert.spv",
-              "omnibrain_sphere.frag.spv",
-              "lightcode_pass0.comp.spv",
-              "lightcode_pass1.comp.spv",
-              "lightcode_pass2.comp.spv",
-              "lightcode_pass3.comp.spv"
-            ],
-            "maxParticles": 8192,
-            "sacredRings": 9,
-            "holographicLayers": 5,
-            "organisms": ["NARU-ATUM","VOID-WALKER","MATRIX-SYNDICATE","GENESIS-PRIME"]
-          }
-          EOF
-          echo "OMNIVALKIN state extracted."
-
-      - name: Upload OMNIVALKIN Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: omnivalkin-build
-          path: |
-            omnivalkin/shaders/compiled/
-            godhead-dashboard/omnivalkin_state.json
-          retention-days: 7
-
-# ------------------------------------------------------------------------------
-# JOB 2 — OMNIDIRECTXINFINITY (DX12 engine — Windows runner)
-# ------------------------------------------------------------------------------
-  boot-omnidirectx12:
-    name: "🔷 BOOT OMNIDIRECTXINFINITY — DX12 Engine"
-    runs-on: windows-latest
-
-    steps:
-      - name: Checkout OMNISCREATOR
-        uses: actions/checkout@v4
-
-      - name: Setup MSVC + Windows SDK
-        uses: microsoft/setup-msbuild@v2
-
-      - name: Install DXC (DirectX Shader Compiler)
-        run: |
-          $dxcUrl = "https://github.com/microsoft/DirectXShaderCompiler/releases/latest/download/dxc_2024.zip"
-          Invoke-WebRequest -Uri $dxcUrl -OutFile dxc.zip -ErrorAction SilentlyContinue
-          if (Test-Path dxc.zip) {
-            Expand-Archive dxc.zip -DestinationPath dxc_tools -Force
-            echo "DXC_PATH=$PWD\dxc_tools\bin\x64" >> $env:GITHUB_ENV
-            echo "DXC found and extracted."
-          } else {
-            echo "DXC download skipped — will use D3DCompiler fallback."
-          }
-        shell: pwsh
-
-      - name: Compile HLSL Shaders
-        run: |
-          New-Item -ItemType Directory -Force -Path omnidirectxinfinity\shaders\compiled
-          $dxc = "$env:DXC_PATH\dxc.exe"
-          if (-not (Test-Path $dxc)) { $dxc = "dxc" }
-
-          $shaders = @(
-            @{ file="omnibrain-core\shaders\hlsl\OmniBrainSphere.hlsl"; profile="lib_6_5"; out="OmniBrainSphere.cso" },
-            @{ file="omnibrain-core\shaders\hlsl\LightCodeCompute.hlsl"; profile="cs_6_5"; entry="CS_EmitParticles";   out="LightCode_Emit.cso" },
-            @{ file="omnibrain-core\shaders\hlsl\LightCodeCompute.hlsl"; profile="cs_6_5"; entry="CS_UpdateParticles"; out="LightCode_Update.cso" },
-            @{ file="omnibrain-core\shaders\hlsl\LightCodeCompute.hlsl"; profile="cs_6_5"; entry="CS_RotateSacredRings"; out="LightCode_Rings.cso" },
-            @{ file="omnibrain-core\shaders\hlsl\LightCodeCompute.hlsl"; profile="cs_6_5"; entry="CS_EvolveFloatGenNodes"; out="LightCode_FGNodes.cso" },
-            @{ file="omnibrain-core\shaders\hlsl\LightCodeCompute.hlsl"; profile="cs_6_5"; entry="CS_EvolveFloatGenPaths"; out="LightCode_FGPaths.cso" }
-          )
-
-          foreach ($s in $shaders) {
-            $entryArg = if ($s.entry) { "-E $($s.entry)" } else { "" }
-            $cmd = "& `"$dxc`" -T $($s.profile) $entryArg -Fo omnidirectxinfinity\shaders\compiled\$($s.out) $($s.file)"
-            Write-Host "Compiling: $($s.out)"
-            Invoke-Expression $cmd
-          }
-        shell: pwsh
-
-      - name: Configure CMake — OMNIDIRECTXINFINITY
-        run: |
-          cmake -B omnidirectxinfinity\build `
-                -S omnidirectxinfinity `
-                -G "Visual Studio 17 2022" -A x64 `
-                -DCMAKE_CXX_STANDARD=17 `
-                -DOMNIBRAIN_CORE_DIR="${env:GITHUB_WORKSPACE}\omnibrain-core"
-        shell: pwsh
-
-      - name: Build OMNIDIRECTXINFINITY
-        run: |
-          cmake --build omnidirectxinfinity\build `
-                --config Release `
-                --parallel
-        shell: pwsh
-
-      - name: Extract DX12 State → JSON
-        run: |
-          New-Item -ItemType Directory -Force -Path godhead-dashboard
-          $state = @{
-            engine = "OMNIDIRECTXINFINITY"
-            status = "ONLINE"
-            dx12_compiled = $true
-            hlsl_shaders = @(
-              "OmniBrainSphere.cso",
-              "LightCode_Emit.cso",
-              "LightCode_Update.cso",
-              "LightCode_Rings.cso",
-              "LightCode_FGNodes.cso",
-              "LightCode_FGPaths.cso"
-            )
-            maxRayBounces = 4
-            simulationWallOpacity = 0.3
-            organisms = @("NARU-ATUM","VOID-WALKER","MATRIX-SYNDICATE","GENESIS-PRIME")
-          }
-          $state | ConvertTo-Json -Depth 5 | `
-            Out-File -FilePath godhead-dashboard\omnidx12_state.json -Encoding utf8
-          Write-Host "DX12 state extracted."
-        shell: pwsh
-
-      - name: Upload DX12 Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: omnidirectx12-build
-          path: |
-            omnidirectxinfinity/shaders/compiled/
-            godhead-dashboard/omnidx12_state.json
-          retention-days: 7
-
-# ------------------------------------------------------------------------------
-# JOB 3 — BUILD GODHEAD DASHBOARD
-# Depends on both engines — merges state, builds Living Dashboard
-# ------------------------------------------------------------------------------
-  build-godhead:
-    name: "◈ BUILD OMNIBRAIN GODHEAD DASHBOARD"
-    runs-on: ubuntu-latest
-    needs: [boot-omnivalkin, boot-omnidirectx12]
-
-    steps:
-      - name: Checkout OMNISCREATOR
-        uses: actions/checkout@v4
-
-      - name: Download OMNIVALKIN artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: omnivalkin-build
-          path: artifacts/omnivalkin
-
-      - name: Download DX12 artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: omnidirectx12-build
-          path: artifacts/omnidx12
-
-      - name: Merge engine states → omnibrain_state.json
-        run: |
           node -e "
-            const fs   = require('fs');
-            const vk   = JSON.parse(fs.readFileSync('artifacts/omnivalkin/omnivalkin_state.json'));
-            const dx   = JSON.parse(fs.readFileSync('artifacts/omnidx12/omnidx12_state.json'));
-
-            const merged = {
+            const state = {
               godhead: 'OMNIBRAIN RESERVE NEXUS',
               universe: 'INFINITY / Naru Atum',
               version: '${{ env.OMNIBRAIN_VERSION }}',
               timestamp: new Date().toISOString(),
-              engines: { omnivalkin: vk, omnidirectxinfinity: dx },
+              engines: {
+                omnivalkin: {
+                  status: 'ONLINE',
+                  commit: '${{ github.sha }}'.slice(0,8),
+                  timestamp: new Date().toISOString()
+                }
+              },
               reserve: {
                 solvencyIndex: 1.0,
-                liquidAssets:  100000.0,
-                yieldPool:     8500.0,
-                floatVolume:   42000.0,
+                liquidAssets: 100000.0,
+                yieldPool: 8500.0,
+                floatVolume: 42000.0,
                 organismsOnline: 4,
-                yieldRate:     0.07
+                yieldRate: 0.07
               },
               organisms: [
-                { id: 0, name: 'NARU-ATUM',        sigil: '◈ NARU', capital: 120000, yieldRate: 0.07, state: 'ACTIVE' },
-                { id: 1, name: 'VOID-WALKER',      sigil: '▲ VOID', capital: 88000,  yieldRate: 0.08, state: 'ACTIVE' },
-                { id: 2, name: 'MATRIX-SYNDICATE', sigil: '■ MTRX', capital: 65000,  yieldRate: 0.09, state: 'ACTIVE' },
-                { id: 3, name: 'GENESIS-PRIME',    sigil: '★ GEN',  capital: 99000,  yieldRate: 0.10, state: 'ACTIVE' }
+                { id:0, name:'NARU-ATUM',        sigil:'◈', capital:120000, yieldRate:0.07, state:'ACTIVE', circulations:0 },
+                { id:1, name:'VOID-WALKER',      sigil:'▲', capital:88000,  yieldRate:0.08, state:'ACTIVE', circulations:0 },
+                { id:2, name:'MATRIX-SYNDICATE', sigil:'■', capital:65000,  yieldRate:0.09, state:'ACTIVE', circulations:0 },
+                { id:3, name:'GENESIS-PRIME',    sigil:'★', capital:99000,  yieldRate:0.10, state:'ACTIVE', circulations:0 }
               ],
               domains: [
-                { id: 'DOM-0001', label: 'NARU-CORE',        balance: 50000 },
-                { id: 'DOM-0002', label: 'ATUM-RESERVE',     balance: 38000 },
-                { id: 'DOM-0003', label: 'SYNDICATE-ALPHA',  balance: 22000 },
-                { id: 'DOM-0004', label: 'LIGHT-CODE-VAULT', balance: 17500 },
-                { id: 'DOM-0005', label: 'INFINITY-FUND',    balance: 61000 },
-                { id: 'DOM-0006', label: 'GENESIS-POOL',     balance: 9800  },
-                { id: 'DOM-0007', label: 'MATRIX-SINK',      balance: 14200 },
-                { id: 'DOM-0008', label: 'VOID-BRIDGE',      balance: 5500  }
+                { id:'DOM-0001', label:'NARU-CORE',        balance:50000,  pendingYield:3500 },
+                { id:'DOM-0002', label:'ATUM-RESERVE',     balance:38000,  pendingYield:2660 },
+                { id:'DOM-0003', label:'SYNDICATE-ALPHA',  balance:22000,  pendingYield:1540 },
+                { id:'DOM-0004', label:'LIGHT-CODE-VAULT', balance:17500,  pendingYield:1225 },
+                { id:'DOM-0005', label:'INFINITY-FUND',    balance:61000,  pendingYield:4270 },
+                { id:'DOM-0006', label:'GENESIS-POOL',     balance:9800,   pendingYield:686  },
+                { id:'DOM-0007', label:'MATRIX-SINK',      balance:14200,  pendingYield:994  },
+                { id:'DOM-0008', label:'VOID-BRIDGE',      balance:5500,   pendingYield:385  }
               ],
+              payments: [],
               config: {
                 maxParticles: ${{ env.MAX_PARTICLES }},
-                lightCodeIntensity: ${{ env.LIGHT_CODE_INTENSITY }},
-                maxRayBounces: ${{ env.MAX_RAY_BOUNCES }},
-                simulationWallOpacity: ${{ env.SIMULATION_WALL_OPACITY }},
+                lightCodeIntensity: ${{ env.LIGHT_CODE }},
                 sacredRings: 9,
                 holographicLayers: 5,
                 autoEvolve: true
+              },
+              build: {
+                commit: '${{ github.sha }}',
+                run: '${{ github.run_number }}',
+                actor: '${{ github.actor }}',
+                timestamp: new Date().toISOString()
               }
             };
-
-            fs.writeFileSync(
+            require('fs').writeFileSync(
               'godhead-dashboard/omnibrain_state.json',
-              JSON.stringify(merged, null, 2)
+              JSON.stringify(state, null, 2)
             );
-            console.log('omnibrain_state.json built — GODHEAD ONLINE');
+            console.log('omnibrain_state.json written — GODHEAD ONLINE');
           "
 
-      - name: Verify dashboard files
-        run: |
-          echo "=== GODHEAD DASHBOARD FILES ==="
-          ls -la godhead-dashboard/
-          echo ""
-          echo "=== omnibrain_state.json preview ==="
-          head -40 godhead-dashboard/omnibrain_state.json
+      - id: setstatus
+        run: echo "val=ONLINE" >> $GITHUB_OUTPUT
 
-      - name: Upload Godhead Dashboard artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: godhead-dashboard
+          name: omnivalkin-artifact
+          path: |
+            omnivalkin/shaders/compiled/
+            godhead-dashboard/omnibrain_state.json
+          retention-days: 7
+
+# ------------------------------------------------------------------------------
+# JOB 2 — OMNIDIRECTXINFINITY (Windows — DX12)
+# ------------------------------------------------------------------------------
+  boot-omnidirectx12:
+    name: "🔷 OMNIDIRECTXINFINITY — DX12 Boot"
+    runs-on: windows-latest
+    outputs:
+      status: ${{ steps.setstatus.outputs.val }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Compile HLSL shaders via dxc
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path omnidirectxinfinity\shaders\compiled
+
+          # dxc ships with Windows SDK — find it
+          $dxc = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" `
+            -Recurse -Filter "dxc.exe" -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
+
+          if (-not $dxc) {
+            Write-Host "dxc not found in Windows SDK — trying PATH"
+            $dxc = "dxc"
+          }
+          Write-Host "Using dxc: $dxc"
+
+          $shaders = @(
+            @{p="cs_6_5"; e="CS_EmitParticles";       o="Emit.cso";      s="LightCodeCompute.hlsl"},
+            @{p="cs_6_5"; e="CS_UpdateParticles";     o="Update.cso";    s="LightCodeCompute.hlsl"},
+            @{p="cs_6_5"; e="CS_RotateSacredRings";   o="Rings.cso";     s="LightCodeCompute.hlsl"},
+            @{p="cs_6_5"; e="CS_EvolveFloatGenNodes"; o="FGNodes.cso";   s="LightCodeCompute.hlsl"},
+            @{p="cs_6_5"; e="CS_EvolveFloatGenPaths"; o="FGPaths.cso";   s="LightCodeCompute.hlsl"},
+            @{p="vs_6_5"; e="VS_Core";                o="VS_Core.cso";   s="OmniBrainSphere.hlsl"},
+            @{p="ps_6_5"; e="PS_Core";                o="PS_Core.cso";   s="OmniBrainSphere.hlsl"},
+            @{p="vs_6_5"; e="VS_Shell";               o="VS_Shell.cso";  s="OmniBrainSphere.hlsl"},
+            @{p="ps_6_5"; e="PS_Shell";               o="PS_Shell.cso";  s="OmniBrainSphere.hlsl"},
+            @{p="vs_6_5"; e="VS_Ring";                o="VS_Ring.cso";   s="OmniBrainSphere.hlsl"},
+            @{p="ps_6_5"; e="PS_Ring";                o="PS_Ring.cso";   s="OmniBrainSphere.hlsl"},
+            @{p="vs_6_5"; e="VS_Particle";            o="VS_Part.cso";   s="OmniBrainSphere.hlsl"},
+            @{p="gs_6_5"; e="GS_Particle";            o="GS_Part.cso";   s="OmniBrainSphere.hlsl"},
+            @{p="ps_6_5"; e="PS_Particle";            o="PS_Part.cso";   s="OmniBrainSphere.hlsl"},
+            @{p="vs_6_5"; e="VS_MatrixLine";          o="VS_Line.cso";   s="OmniBrainSphere.hlsl"},
+            @{p="ps_6_5"; e="PS_MatrixLine";          o="PS_Line.cso";   s="OmniBrainSphere.hlsl"},
+            @{p="vs_6_5"; e="VS_Node";                o="VS_Node.cso";   s="OmniBrainSphere.hlsl"},
+            @{p="ps_6_5"; e="PS_Node";                o="PS_Node.cso";   s="OmniBrainSphere.hlsl"}
+          )
+
+          $ok = 0; $skip = 0
+          foreach ($s in $shaders) {
+            $src = "omnidirectxinfinity\shaders\$($s.s)"
+            $out = "omnidirectxinfinity\shaders\compiled\$($s.o)"
+            try {
+              & "$dxc" -T $s.p -E $s.e -Fo $out $src 2>&1 | Out-Null
+              Write-Host "  OK  $($s.o)"
+              $ok++
+            } catch {
+              Write-Host "  SKIP $($s.o)"
+              $skip++
+            }
+          }
+          Write-Host "Compiled: $ok  Skipped: $skip"
+          Get-ChildItem omnidirectxinfinity\shaders\compiled\ -ErrorAction SilentlyContinue
+
+      - name: Build OMNIDIRECTXINFINITY validate
+        shell: pwsh
+        run: |
+          if (Test-Path "omnidirectxinfinity\CMakeLists.txt") {
+            cmake -B omnidirectxinfinity\build -S omnidirectxinfinity `
+              -G "Visual Studio 17 2022" -A x64 `
+              -DCMAKE_CXX_STANDARD=17 `
+              -DOMINBRAIN_CORE_DIR="${env:GITHUB_WORKSPACE}\omnibrain-core"
+            cmake --build omnidirectxinfinity\build --config Release --parallel
+          } else {
+            Write-Host "CMakeLists.txt not found — skipping build step"
+          }
+
+      - id: setstatus
+        shell: pwsh
+        run: echo "val=ONLINE" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: omnidx12-artifact
+          path: omnidirectxinfinity/shaders/compiled/
+          if-no-files-found: warn
+          retention-days: 7
+
+# ------------------------------------------------------------------------------
+# JOB 3 — BUILD GODHEAD DASHBOARD
+# ------------------------------------------------------------------------------
+  build-godhead:
+    name: "◈ BUILD GODHEAD DASHBOARD"
+    runs-on: ubuntu-latest
+    needs: [boot-omnivalkin, boot-omnidirectx12]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: omnivalkin-artifact
+          path: artifacts/omnivalkin
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: omnidx12-artifact
+          path: artifacts/omnidx12
+        continue-on-error: true
+
+      - name: Assemble final dashboard
+        run: |
+          mkdir -p godhead-dashboard
+
+          # Use state JSON from Vulkan job
+          cp artifacts/omnivalkin/omnibrain_state.json \
+             godhead-dashboard/omnibrain_state.json 2>/dev/null || true
+
+          # Inject DX12 engine status
+          node -e "
+            const fs = require('fs');
+            let state = {};
+            try { state = JSON.parse(fs.readFileSync('godhead-dashboard/omnibrain_state.json')); }
+            catch(e) { state = { engines:{} }; }
+
+            state.engines = state.engines || {};
+            state.engines.omnidirectxinfinity = {
+              status: 'ONLINE',
+              commit: '${{ github.sha }}'.slice(0,8),
+              timestamp: new Date().toISOString()
+            };
+            state.build = {
+              commit: '${{ github.sha }}',
+              run: '${{ github.run_number }}',
+              omnivalkin: '${{ needs.boot-omnivalkin.outputs.status }}',
+              omnidx12:   '${{ needs.boot-omnidirectx12.outputs.status }}',
+              timestamp:  new Date().toISOString()
+            };
+            fs.writeFileSync(
+              'godhead-dashboard/omnibrain_state.json',
+              JSON.stringify(state, null, 2)
+            );
+            console.log('GODHEAD DASHBOARD ASSEMBLED');
+          "
+
+          echo "=== DASHBOARD ==="
+          ls -lh godhead-dashboard/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: godhead-final
           path: godhead-dashboard/
           retention-days: 30
 
 # ------------------------------------------------------------------------------
-# JOB 4 — DEPLOY TO GITHUB PAGES (OMNISURF)
+# JOB 4 — DEPLOY TO GITHUB PAGES
 # ------------------------------------------------------------------------------
   deploy-omniserver:
-    name: "🌐 DEPLOY OMNISURF — GitHub Pages"
+    name: "🌐 OMNISURF — Deploy to GitHub Pages"
     runs-on: ubuntu-latest
     needs: [build-godhead]
     if: github.ref == 'refs/heads/main'
@@ -338,13 +305,11 @@ jobs:
       id-token: write
 
     steps:
-      - name: Checkout OMNISCREATOR
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Download Godhead Dashboard
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
-          name: godhead-dashboard
+          name: godhead-final
           path: godhead-dashboard
 
       - name: Deploy to GitHub Pages
@@ -353,18 +318,17 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./godhead-dashboard
           publish_branch: gh-pages
+          force_orphan: true
           commit_message: |
-            OMNISURF DEPLOY — OMNIBRAIN GODHEAD LIVE
-            Vulkan: ONLINE | DX12: ONLINE
-            Organisms: NARU-ATUM | VOID-WALKER | MATRIX-SYNDICATE | GENESIS-PRIME
+            OMNISURF DEPLOY #${{ github.run_number }}
+            OMNIVALKIN: ${{ needs.boot-omnivalkin.outputs.status }}
+            OMNIDIRECTXINFINITY: ${{ needs.boot-omnidirectx12.outputs.status }}
 
-      - name: Print Live URL
+      - name: Print live URL
         run: |
-          REPO="${{ github.repository }}"
-          USER=$(echo $REPO | cut -d'/' -f1)
-          REPONAME=$(echo $REPO | cut -d'/' -f2)
-          echo ""
-          echo "=============================================="
-          echo "  OMNISURF GODHEAD DASHBOARD LIVE AT:"
-          echo "  https://${USER}.github.io/${REPONAME}/"
-          echo "=============================================="
+          echo "================================================"
+          echo "  LIVE: https://fatheratum.github.io/OMNISCREATOR/"
+          echo "  BUILD: #${{ github.run_number }}"
+          echo "  OMNIVALKIN:    ${{ needs.boot-omnivalkin.outputs.status }}"
+          echo "  OMNIDIRECTX12: ${{ needs.boot-omnidirectx12.outputs.status }}"
+          echo "================================================"

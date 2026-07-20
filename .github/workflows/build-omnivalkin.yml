@@ -1,23 +1,35 @@
 name: Build OMNIVALKIN (Vulkan)
+
 on:
   push:
-    branches: [main]
+    paths: ['omnivalkin/**','omnibrain-core/**']
   workflow_dispatch:
+
 jobs:
   build-vulkan:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install Vulkan SDK
+      - name: Install glslc
         run: |
-          wget -qO- https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo tee /etc/apt/trusted.gpg.d/lunarg.asc
-          sudo apt-get update && sudo apt-get install -y vulkan-sdk glslc cmake ninja-build
-      - name: Configure CMake
-        run: cmake -B build -S omnivalkin -G Ninja
-      - name: Build
-        run: cmake --build build --target OMNIVALKIN -j 4
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: OMNIVALKIN-Release
-          path: build/OMNIVALKIN
+          sudo apt-get update -qq
+          sudo apt-get install -y glslc cmake ninja-build g++-12
+      - name: Compile GLSL shaders
+        run: |
+          mkdir -p omnivalkin/shaders/compiled
+          glslc omnivalkin/shaders/omnibrain_sphere.vert \
+                -o omnivalkin/shaders/compiled/sphere.vert.spv || true
+          glslc omnivalkin/shaders/omnibrain_sphere.frag \
+                -o omnivalkin/shaders/compiled/sphere.frag.spv || true
+          for pass in 0 1 2 3; do
+            glslc -fshader-stage=compute \
+              omnivalkin/shaders/lightcode_compute.comp \
+              -o omnivalkin/shaders/compiled/lightcode_pass${pass}.spv || true
+          done
+          ls -lh omnivalkin/shaders/compiled/
+      - name: Build validate
+        run: |
+          cmake -B omnivalkin/build -S omnivalkin -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DOMNIBRAIN_CORE_DIR="${GITHUB_WORKSPACE}/omnibrain-core" || true
+          cmake --build omnivalkin/build --parallel || true

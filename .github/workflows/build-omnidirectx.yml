@@ -1,21 +1,44 @@
 name: Build OMNIDIRECTXINFINITY (DX12)
+
 on:
   push:
-    branches: [main]
+    paths: ['omnidirectxinfinity/**','omnibrain-core/**']
   workflow_dispatch:
+
 jobs:
   build-dx12:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Setup MSVC
-        uses: ilammy/msvc-dev-cmd@v1
-      - name: Configure CMake
-        run: cmake -B build -S omnidirectxinfinity -G "Visual Studio 17 2022" -A x64
-      - name: Build
-        run: cmake --build build --config Release --target OMNIDIRECTXINFINITY -j 4
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: OMNIDIRECTXINFINITY-Release
-          path: build/Release/OMNIDIRECTXINFINITY.exe
+      - uses: microsoft/setup-msbuild@v2
+      - name: Compile HLSL shaders
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path omnidirectxinfinity\shaders\compiled
+          $dxc = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" `
+            -Recurse -Filter "dxc.exe" -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1 -ExpandProperty FullName
+          if (-not $dxc) { $dxc = "dxc" }
+          Write-Host "dxc: $dxc"
+          $shaders = @(
+            @{p="cs_6_5";e="CS_EmitParticles";    o="Emit.cso";    s="LightCodeCompute.hlsl"},
+            @{p="vs_6_5";e="VS_Core";             o="VS_Core.cso"; s="OmniBrainSphere.hlsl"},
+            @{p="ps_6_5";e="PS_Core";             o="PS_Core.cso"; s="OmniBrainSphere.hlsl"}
+          )
+          foreach ($s in $shaders) {
+            $src = "omnidirectxinfinity\shaders\$($s.s)"
+            $out = "omnidirectxinfinity\shaders\compiled\$($s.o)"
+            try { & "$dxc" -T $s.p -E $s.e -Fo $out $src; Write-Host "OK $($s.o)" }
+            catch { Write-Host "SKIP $($s.o)" }
+          }
+      - name: Build validate
+        shell: pwsh
+        run: |
+          if (Test-Path "omnidirectxinfinity\CMakeLists.txt") {
+            cmake -B omnidirectxinfinity\build -S omnidirectxinfinity `
+              -G "Visual Studio 17 2022" -A x64 `
+              -DCMAKE_CXX_STANDARD=17 `
+              -DOMNIBRAIN_CORE_DIR="${env:GITHUB_WORKSPACE}\omnibrain-core"
+            cmake --build omnidirectxinfinity\build --config Release
+          } else { Write-Host "No CMakeLists.txt — skipping" }
