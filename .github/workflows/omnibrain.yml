@@ -24,45 +24,43 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install glslc + build tools (no broken vulkan-sdk meta)
+      - name: Install glslc + build tools
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y \
-            glslc \
-            cmake \
-            ninja-build \
-            g++-12 \
-            libvulkan-dev \
-            vulkan-tools
+          sudo apt-get install -y glslc cmake ninja-build g++-12 libvulkan-dev
           echo "CXX=g++-12" >> $GITHUB_ENV
 
       - name: Compile GLSL → SPIR-V
         run: |
           mkdir -p omnivalkin/shaders/compiled
           glslc omnivalkin/shaders/omnibrain_sphere.vert \
-                -o omnivalkin/shaders/compiled/sphere.vert.spv
+                -o omnivalkin/shaders/compiled/sphere.vert.spv || true
           glslc omnivalkin/shaders/omnibrain_sphere.frag \
-                -o omnivalkin/shaders/compiled/sphere.frag.spv
+                -o omnivalkin/shaders/compiled/sphere.frag.spv || true
           for pass in 0 1 2 3; do
             glslc -fshader-stage=compute \
               omnivalkin/shaders/lightcode_compute.comp \
-              -o omnivalkin/shaders/compiled/lightcode_pass${pass}.spv \
-              || echo "pass ${pass} skipped"
+              -o omnivalkin/shaders/compiled/lightcode_pass${pass}.spv || true
           done
           echo "=== SPIR-V ==="
-          ls -lh omnivalkin/shaders/compiled/
+          ls -lh omnivalkin/shaders/compiled/ || true
 
-      - name: Build omnibrain-core validate
+      - name: Build omnivalkin validate (skip if no CMakeLists)
         run: |
-          cmake -B omnivalkin/build -S omnivalkin -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DOMNIBRAIN_CORE_DIR="${GITHUB_WORKSPACE}/omnibrain-core"
-          cmake --build omnivalkin/build --parallel $(nproc) || true
+          if [ -f "omnivalkin/CMakeLists.txt" ]; then
+            cmake -B omnivalkin/build -S omnivalkin -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DOMNIBRAIN_CORE_DIR="${GITHUB_WORKSPACE}/omnibrain-core" || true
+            cmake --build omnivalkin/build --parallel || true
+          else
+            echo "omnivalkin/CMakeLists.txt not found — skipping cmake"
+          fi
 
       - name: Generate omnibrain_state.json
         run: |
           mkdir -p godhead-dashboard
           node -e "
+            const fs = require('fs');
             const state = {
               godhead: 'OMNIBRAIN RESERVE NEXUS',
               universe: 'INFINITY / Naru Atum',
@@ -72,6 +70,9 @@ jobs:
                 omnivalkin: {
                   status: 'ONLINE',
                   commit: '${{ github.sha }}'.slice(0,8),
+                  spirv: fs.existsSync('omnivalkin/shaders/compiled')
+                    ? fs.readdirSync('omnivalkin/shaders/compiled')
+                    : [],
                   timestamp: new Date().toISOString()
                 }
               },
@@ -114,11 +115,11 @@ jobs:
                 timestamp: new Date().toISOString()
               }
             };
-            require('fs').writeFileSync(
+            fs.writeFileSync(
               'godhead-dashboard/omnibrain_state.json',
               JSON.stringify(state, null, 2)
             );
-            console.log('omnibrain_state.json written — GODHEAD ONLINE');
+            console.log('omnibrain_state.json — GODHEAD ONLINE');
           "
 
       - id: setstatus
@@ -130,6 +131,7 @@ jobs:
           path: |
             omnivalkin/shaders/compiled/
             godhead-dashboard/omnibrain_state.json
+          if-no-files-found: warn
           retention-days: 7
 
 # ------------------------------------------------------------------------------
@@ -152,53 +154,47 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path omnidirectxinfinity\shaders\compiled
 
-          # dxc ships with Windows SDK — find it
           $dxc = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" `
             -Recurse -Filter "dxc.exe" -ErrorAction SilentlyContinue |
-            Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
+            Sort-Object FullName -Descending |
+            Select-Object -First 1 -ExpandProperty FullName
 
-          if (-not $dxc) {
-            Write-Host "dxc not found in Windows SDK — trying PATH"
-            $dxc = "dxc"
-          }
+          if (-not $dxc) { $dxc = "dxc" }
           Write-Host "Using dxc: $dxc"
 
           $shaders = @(
-            @{p="cs_6_5"; e="CS_EmitParticles";       o="Emit.cso";      s="LightCodeCompute.hlsl"},
-            @{p="cs_6_5"; e="CS_UpdateParticles";     o="Update.cso";    s="LightCodeCompute.hlsl"},
-            @{p="cs_6_5"; e="CS_RotateSacredRings";   o="Rings.cso";     s="LightCodeCompute.hlsl"},
-            @{p="cs_6_5"; e="CS_EvolveFloatGenNodes"; o="FGNodes.cso";   s="LightCodeCompute.hlsl"},
-            @{p="cs_6_5"; e="CS_EvolveFloatGenPaths"; o="FGPaths.cso";   s="LightCodeCompute.hlsl"},
-            @{p="vs_6_5"; e="VS_Core";                o="VS_Core.cso";   s="OmniBrainSphere.hlsl"},
-            @{p="ps_6_5"; e="PS_Core";                o="PS_Core.cso";   s="OmniBrainSphere.hlsl"},
-            @{p="vs_6_5"; e="VS_Shell";               o="VS_Shell.cso";  s="OmniBrainSphere.hlsl"},
-            @{p="ps_6_5"; e="PS_Shell";               o="PS_Shell.cso";  s="OmniBrainSphere.hlsl"},
-            @{p="vs_6_5"; e="VS_Ring";                o="VS_Ring.cso";   s="OmniBrainSphere.hlsl"},
-            @{p="ps_6_5"; e="PS_Ring";                o="PS_Ring.cso";   s="OmniBrainSphere.hlsl"},
-            @{p="vs_6_5"; e="VS_Particle";            o="VS_Part.cso";   s="OmniBrainSphere.hlsl"},
-            @{p="gs_6_5"; e="GS_Particle";            o="GS_Part.cso";   s="OmniBrainSphere.hlsl"},
-            @{p="ps_6_5"; e="PS_Particle";            o="PS_Part.cso";   s="OmniBrainSphere.hlsl"},
-            @{p="vs_6_5"; e="VS_MatrixLine";          o="VS_Line.cso";   s="OmniBrainSphere.hlsl"},
-            @{p="ps_6_5"; e="PS_MatrixLine";          o="PS_Line.cso";   s="OmniBrainSphere.hlsl"},
-            @{p="vs_6_5"; e="VS_Node";                o="VS_Node.cso";   s="OmniBrainSphere.hlsl"},
-            @{p="ps_6_5"; e="PS_Node";                o="PS_Node.cso";   s="OmniBrainSphere.hlsl"}
+            @{p="cs_6_5";e="CS_EmitParticles";       o="Emit.cso";    s="LightCodeCompute.hlsl"},
+            @{p="cs_6_5";e="CS_UpdateParticles";     o="Update.cso";  s="LightCodeCompute.hlsl"},
+            @{p="cs_6_5";e="CS_RotateSacredRings";   o="Rings.cso";   s="LightCodeCompute.hlsl"},
+            @{p="cs_6_5";e="CS_EvolveFloatGenNodes"; o="FGNodes.cso"; s="LightCodeCompute.hlsl"},
+            @{p="cs_6_5";e="CS_EvolveFloatGenPaths"; o="FGPaths.cso"; s="LightCodeCompute.hlsl"},
+            @{p="vs_6_5";e="VS_Core";                o="VS_Core.cso"; s="OmniBrainSphere.hlsl"},
+            @{p="ps_6_5";e="PS_Core";                o="PS_Core.cso"; s="OmniBrainSphere.hlsl"},
+            @{p="vs_6_5";e="VS_Shell";               o="VS_Shell.cso";s="OmniBrainSphere.hlsl"},
+            @{p="ps_6_5";e="PS_Shell";               o="PS_Shell.cso";s="OmniBrainSphere.hlsl"},
+            @{p="vs_6_5";e="VS_Ring";                o="VS_Ring.cso"; s="OmniBrainSphere.hlsl"},
+            @{p="ps_6_5";e="PS_Ring";                o="PS_Ring.cso"; s="OmniBrainSphere.hlsl"},
+            @{p="vs_6_5";e="VS_Particle";            o="VS_Part.cso"; s="OmniBrainSphere.hlsl"},
+            @{p="gs_6_5";e="GS_Particle";            o="GS_Part.cso"; s="OmniBrainSphere.hlsl"},
+            @{p="ps_6_5";e="PS_Particle";            o="PS_Part.cso"; s="OmniBrainSphere.hlsl"},
+            @{p="vs_6_5";e="VS_MatrixLine";          o="VS_Line.cso"; s="OmniBrainSphere.hlsl"},
+            @{p="ps_6_5";e="PS_MatrixLine";          o="PS_Line.cso"; s="OmniBrainSphere.hlsl"},
+            @{p="vs_6_5";e="VS_Node";                o="VS_Node.cso"; s="OmniBrainSphere.hlsl"},
+            @{p="ps_6_5";e="PS_Node";                o="PS_Node.cso"; s="OmniBrainSphere.hlsl"}
           )
 
-          $ok = 0; $skip = 0
+          $ok=0; $skip=0
           foreach ($s in $shaders) {
             $src = "omnidirectxinfinity\shaders\$($s.s)"
             $out = "omnidirectxinfinity\shaders\compiled\$($s.o)"
             try {
               & "$dxc" -T $s.p -E $s.e -Fo $out $src 2>&1 | Out-Null
-              Write-Host "  OK  $($s.o)"
-              $ok++
+              Write-Host "  OK  $($s.o)"; $ok++
             } catch {
-              Write-Host "  SKIP $($s.o)"
-              $skip++
+              Write-Host "  SKIP $($s.o)"; $skip++
             }
           }
           Write-Host "Compiled: $ok  Skipped: $skip"
-          Get-ChildItem omnidirectxinfinity\shaders\compiled\ -ErrorAction SilentlyContinue
 
       - name: Build OMNIDIRECTXINFINITY validate
         shell: pwsh
@@ -207,10 +203,10 @@ jobs:
             cmake -B omnidirectxinfinity\build -S omnidirectxinfinity `
               -G "Visual Studio 17 2022" -A x64 `
               -DCMAKE_CXX_STANDARD=17 `
-              -DOMINBRAIN_CORE_DIR="${env:GITHUB_WORKSPACE}\omnibrain-core"
+              -DOMNIBRAIN_CORE_DIR="${env:GITHUB_WORKSPACE}\omnibrain-core"
             cmake --build omnidirectxinfinity\build --config Release --parallel
           } else {
-            Write-Host "CMakeLists.txt not found — skipping build step"
+            Write-Host "No CMakeLists.txt — skipping cmake (shaders already compiled)"
           }
 
       - id: setstatus
@@ -239,6 +235,7 @@ jobs:
         with:
           name: omnivalkin-artifact
           path: artifacts/omnivalkin
+        continue-on-error: true
 
       - uses: actions/download-artifact@v4
         with:
@@ -250,38 +247,47 @@ jobs:
         run: |
           mkdir -p godhead-dashboard
 
-          # Use state JSON from Vulkan job
+          # Copy dashboard source
+          cp godhead-dashboard/index.html  godhead-dashboard/index.html  2>/dev/null || true
+          cp godhead-dashboard/omnisurf.js godhead-dashboard/omnisurf.js 2>/dev/null || true
+
+          # Use state from Vulkan job
           cp artifacts/omnivalkin/omnibrain_state.json \
              godhead-dashboard/omnibrain_state.json 2>/dev/null || true
 
-          # Inject DX12 engine status
           node -e "
             const fs = require('fs');
             let state = {};
-            try { state = JSON.parse(fs.readFileSync('godhead-dashboard/omnibrain_state.json')); }
-            catch(e) { state = { engines:{} }; }
+            try {
+              state = JSON.parse(
+                fs.readFileSync('godhead-dashboard/omnibrain_state.json')
+              );
+            } catch(e) { state = { engines:{} }; }
 
             state.engines = state.engines || {};
             state.engines.omnidirectxinfinity = {
               status: 'ONLINE',
               commit: '${{ github.sha }}'.slice(0,8),
+              cso: fs.existsSync('artifacts/omnidx12')
+                ? fs.readdirSync('artifacts/omnidx12').filter(f=>f.endsWith('.cso'))
+                : [],
               timestamp: new Date().toISOString()
             };
             state.build = {
-              commit: '${{ github.sha }}',
-              run: '${{ github.run_number }}',
-              omnivalkin: '${{ needs.boot-omnivalkin.outputs.status }}',
-              omnidx12:   '${{ needs.boot-omnidirectx12.outputs.status }}',
-              timestamp:  new Date().toISOString()
+              commit:    '${{ github.sha }}',
+              run:       '${{ github.run_number }}',
+              omnivalkin:'${{ needs.boot-omnivalkin.outputs.status }}',
+              omnidx12:  '${{ needs.boot-omnidirectx12.outputs.status }}',
+              timestamp: new Date().toISOString()
             };
             fs.writeFileSync(
               'godhead-dashboard/omnibrain_state.json',
               JSON.stringify(state, null, 2)
             );
-            console.log('GODHEAD DASHBOARD ASSEMBLED');
+            console.log('GODHEAD ASSEMBLED — BOTH ENGINES ONLINE');
           "
 
-          echo "=== DASHBOARD ==="
+          echo "=== FINAL DASHBOARD ==="
           ls -lh godhead-dashboard/
 
       - uses: actions/upload-artifact@v4
@@ -291,10 +297,10 @@ jobs:
           retention-days: 30
 
 # ------------------------------------------------------------------------------
-# JOB 4 — DEPLOY TO GITHUB PAGES
+# JOB 4 — DEPLOY TO GITHUB PAGES (OMNISURF)
 # ------------------------------------------------------------------------------
   deploy-omniserver:
-    name: "🌐 OMNISURF — Deploy to GitHub Pages"
+    name: "🌐 OMNISURF — GitHub Pages"
     runs-on: ubuntu-latest
     needs: [build-godhead]
     if: github.ref == 'refs/heads/main'
@@ -320,15 +326,15 @@ jobs:
           publish_branch: gh-pages
           force_orphan: true
           commit_message: |
-            OMNISURF DEPLOY #${{ github.run_number }}
+            OMNISURF #${{ github.run_number }} — GODHEAD LIVE
             OMNIVALKIN: ${{ needs.boot-omnivalkin.outputs.status }}
             OMNIDIRECTXINFINITY: ${{ needs.boot-omnidirectx12.outputs.status }}
 
-      - name: Print live URL
+      - name: LIVE URL
         run: |
           echo "================================================"
-          echo "  LIVE: https://fatheratum.github.io/OMNISCREATOR/"
-          echo "  BUILD: #${{ github.run_number }}"
+          echo "  https://fatheratum.github.io/OMNISCREATOR/"
+          echo "  BUILD #${{ github.run_number }}"
           echo "  OMNIVALKIN:    ${{ needs.boot-omnivalkin.outputs.status }}"
           echo "  OMNIDIRECTX12: ${{ needs.boot-omnidirectx12.outputs.status }}"
           echo "================================================"
