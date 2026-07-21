@@ -1,75 +1,35 @@
 name: Deploy Godhead Dashboard
-
 on:
   push:
     branches: [main]
-    paths:
-      - 'godhead-dashboard/**'
-      - 'omnibrain-core/**'
+    paths: ['godhead-dashboard/**', 'omnibrain-core/**']
   workflow_dispatch:
-
 jobs:
   deploy:
     name: Deploy to GitHub Pages
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pages: write
-      id-token: write
+    permissions: { contents: write, pages: write, id-token: write }
     steps:
       - uses: actions/checkout@v4
-
-      - name: Generate fresh omnibrain state (Python core)
+      - name: Generate fresh omnibrain state
+        run: python3 omnibrain-core/run_godhead.py --export-only || echo "::warning::export failed, using fallback"
+      - name: Adapt state to UI schema
         run: |
-          if python3 omnibrain-core/run_godhead.py --export-only; then
-            echo "OK — fresh state generated"
-          else
-            echo "::warning::Python export failed — using committed fallback"
-          fi
-
-      - name: Adapt state to UI schema + sanitize + stamp
-        run: |
-          if [ ! -f godhead-dashboard/omnibrain_state.json ]; then
-            echo "::warning::no state file — UI boots on defaults"; exit 0
-          fi
+          [ -f godhead-dashboard/omnibrain_state.json ] || { echo "::warning::no state"; exit 0; }
           node -e "
-            const fs = require('fs');
-            const p = 'godhead-dashboard/omnibrain_state.json';
-            let raw = fs.readFileSync(p, 'utf8');
-            raw = raw.replace(/-Infinity/g, '-9999999').replace(/Infinity/g, '9999999').replace(/NaN/g, '0');
-            let s;
-            try { s = JSON.parse(raw); } catch(e) { console.log('WARN unparseable'); process.exit(0); }
-            const frac = v => (typeof v === 'number' && v > 1) ? v / 100 : v;
-            if (s.reserve) {
-              s.reserve.yieldRate = frac(s.reserve.yieldRate);
-              if (typeof s.reserve.yieldPool !== 'number') {
-                s.reserve.yieldPool = Math.round((s.reserve.liquidAssets || 0) * (s.reserve.yieldRate || 0) * 100) / 100;
-              }
-            }
-            const sigils = { naru_atum:'\u25c8', void_walker:'\u25b2', matrix_syndicate:'\u25a0', genesis_prime:'\u2605', lumen:'\u2726' };
-            if (Array.isArray(s.organisms)) {
-              s.organisms = s.organisms.map(o => ({
-                sigil: o.sigil || sigils[o.name] || '\u25c8',
-                circulations: o.circulations || 0,
-                inventory: o.inventory || [],
-                ...o,
-                yieldRate: frac(o.yieldRate)
-              }));
-            }
-            s.engines = s.engines || {};
-            s.engines.omnidirectxinfinity = s.engines.omnidirectxinfinity || { status: 'ONLINE' };
-            s.engines.omnivalkin = s.engines.omnivalkin || { status: 'ONLINE' };
-            s.build = { commit: '${{ github.sha }}'.slice(0,8), run: '${{ github.run_number }}', timestamp: new Date().toISOString() };
-            fs.writeFileSync(p, JSON.stringify(s, null, 2));
-            console.log('Adapted:', JSON.stringify(s.reserve));
+            const fs=require('fs'),p='godhead-dashboard/omnibrain_state.json';
+            let raw=fs.readFileSync(p,'utf8').replace(/-Infinity/g,'-9999999').replace(/Infinity/g,'9999999').replace(/NaN/g,'0');
+            let s; try{s=JSON.parse(raw);}catch(e){console.log('WARN unparseable');process.exit(0);}
+            const frac=v=>(typeof v==='number'&&v>1)?v/100:v;
+            if(s.reserve){s.reserve.yieldRate=frac(s.reserve.yieldRate);
+              if(typeof s.reserve.yieldPool!=='number')s.reserve.yieldPool=Math.round((s.reserve.liquidAssets||0)*(s.reserve.yieldRate||0)*100)/100;}
+            const g={naru_atum:'\u25c8',void_walker:'\u25b2',matrix_syndicate:'\u25a0',genesis_prime:'\u2605',lumen:'\u2726'};
+            if(Array.isArray(s.organisms))s.organisms=s.organisms.map(o=>({sigil:o.sigil||g[o.name]||'\u25c8',circulations:o.circulations||0,inventory:o.inventory||[],...o,yieldRate:frac(o.yieldRate)}));
+            s.engines=s.engines||{};s.engines.omnidirectxinfinity=s.engines.omnidirectxinfinity||{status:'ONLINE'};s.engines.omnivalkin=s.engines.omnivalkin||{status:'ONLINE'};
+            s.build={commit:'${{ github.sha }}'.slice(0,8),run:'${{ github.run_number }}',timestamp:new Date().toISOString()};
+            fs.writeFileSync(p,JSON.stringify(s,null,2));console.log('Adapted:',JSON.stringify(s.reserve));
           "
-
-      - name: Verify dashboard files
-        run: |
-          ls -lh godhead-dashboard/
-          head -c 400 godhead-dashboard/omnibrain_state.json || true
-
-      - name: Deploy to GitHub Pages
+      - name: Deploy
         uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -77,6 +37,3 @@ jobs:
           publish_branch: gh-pages
           force_orphan: true
           commit_message: "OMNISURF DEPLOY — GODHEAD LIVE"
-
-      - name: Print live URL
-        run: echo "LIVE - https://fatheratum.github.io/OMNISCREATOR/"
