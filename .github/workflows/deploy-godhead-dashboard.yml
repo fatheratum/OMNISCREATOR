@@ -12,28 +12,25 @@ jobs:
   deploy:
     name: Deploy to GitHub Pages
     runs-on: ubuntu-latest
-
     permissions:
       contents: write
       pages: write
       id-token: write
-
     steps:
       - uses: actions/checkout@v4
 
       - name: Generate fresh omnibrain state (Python core)
         run: |
           if python3 omnibrain-core/run_godhead.py --export-only; then
-            echo "OK — fresh omnibrain_state.json generated"
+            echo "OK — fresh state generated"
           else
-            echo "::warning::Python export failed — using committed fallback if present"
+            echo "::warning::Python export failed — using committed fallback"
           fi
 
       - name: Adapt state to UI schema + sanitize + stamp
         run: |
           if [ ! -f godhead-dashboard/omnibrain_state.json ]; then
-            echo "::warning::no omnibrain_state.json — UI will boot on live defaults"
-            exit 0
+            echo "::warning::no state file — UI boots on defaults"; exit 0
           fi
           node -e "
             const fs = require('fs');
@@ -41,38 +38,30 @@ jobs:
             let raw = fs.readFileSync(p, 'utf8');
             raw = raw.replace(/-Infinity/g, '-9999999').replace(/Infinity/g, '9999999').replace(/NaN/g, '0');
             let s;
-            try { s = JSON.parse(raw); }
-            catch(e) { console.log('WARN unparseable — leaving untouched'); process.exit(0); }
-
+            try { s = JSON.parse(raw); } catch(e) { console.log('WARN unparseable'); process.exit(0); }
             const frac = v => (typeof v === 'number' && v > 1) ? v / 100 : v;
-
-            // reserve: fraction yieldRate + required yieldPool
             if (s.reserve) {
               s.reserve.yieldRate = frac(s.reserve.yieldRate);
               if (typeof s.reserve.yieldPool !== 'number') {
                 s.reserve.yieldPool = Math.round((s.reserve.liquidAssets || 0) * (s.reserve.yieldRate || 0) * 100) / 100;
               }
             }
-
-            // organisms: sigil + fraction yieldRate + safe defaults
-            const sigils = { naru_atum:'◈', void_walker:'▲', matrix_syndicate:'■', genesis_prime:'★', lumen:'✦' };
+            const sigils = { naru_atum:'\u25c8', void_walker:'\u25b2', matrix_syndicate:'\u25a0', genesis_prime:'\u2605', lumen:'\u2726' };
             if (Array.isArray(s.organisms)) {
               s.organisms = s.organisms.map(o => ({
-                sigil: o.sigil || sigils[o.name] || '◈',
+                sigil: o.sigil || sigils[o.name] || '\u25c8',
                 circulations: o.circulations || 0,
                 inventory: o.inventory || [],
                 ...o,
                 yieldRate: frac(o.yieldRate)
               }));
             }
-
             s.engines = s.engines || {};
             s.engines.omnidirectxinfinity = s.engines.omnidirectxinfinity || { status: 'ONLINE' };
             s.engines.omnivalkin = s.engines.omnivalkin || { status: 'ONLINE' };
             s.build = { commit: '${{ github.sha }}'.slice(0,8), run: '${{ github.run_number }}', timestamp: new Date().toISOString() };
-
             fs.writeFileSync(p, JSON.stringify(s, null, 2));
-            console.log('Adapted to UI schema:', JSON.stringify(s.reserve));
+            console.log('Adapted:', JSON.stringify(s.reserve));
           "
 
       - name: Verify dashboard files
