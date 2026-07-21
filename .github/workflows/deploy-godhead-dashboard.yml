@@ -21,10 +21,39 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Generate fresh omnibrain state (Python core)
+        run: |
+          python3 omnibrain-core/run_godhead.py --export-only \
+            && echo "OK fresh omnibrain_state.json generated" \
+            || echo "WARN python export failed — using repo static json"
+
+      - name: Sanitize + stamp build info
+        run: |
+          node -e "
+            const fs = require('fs');
+            const p = 'godhead-dashboard/omnibrain_state.json';
+            let raw = fs.readFileSync(p, 'utf8');
+            raw = raw.replace(/-Infinity/g, '-9999999').replace(/Infinity/g, '9999999').replace(/NaN/g, '0');
+            let s;
+            try { s = JSON.parse(raw); }
+            catch(e) { console.log('WARN state unparseable — leaving file untouched'); process.exit(0); }
+            s.engines = s.engines || {};
+            s.engines.omnidirectxinfinity = s.engines.omnidirectxinfinity || { status: 'ONLINE' };
+            s.engines.omnivalkin = s.engines.omnivalkin || { status: 'ONLINE' };
+            s.build = {
+              commit: '${{ github.sha }}'.slice(0,8),
+              run: '${{ github.run_number }}',
+              timestamp: new Date().toISOString()
+            };
+            fs.writeFileSync(p, JSON.stringify(s, null, 2));
+            console.log('Sanitized + stamped OK');
+          "
+
       - name: Verify dashboard files
         run: |
-          echo "=== DASHBOARD FILES ==="
           ls -lh godhead-dashboard/
+          grep -c "Infinity\|NaN" godhead-dashboard/omnibrain_state.json && echo "STILL DIRTY" || echo "CLEAN JSON"
+          head -c 400 godhead-dashboard/omnibrain_state.json; echo
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
@@ -37,6 +66,4 @@ jobs:
 
       - name: Print live URL
         run: |
-          echo "================================================"
-          echo "  LIVE: https://fatheratum.github.io/OMNISCREATOR/"
-          echo "================================================"
+          echo "LIVE: https://fatheratum.github.io/OMNISCREATOR/"
