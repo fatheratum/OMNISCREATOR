@@ -26,10 +26,10 @@ jobs:
           if python3 omnibrain-core/run_godhead.py --export-only; then
             echo "OK — fresh omnibrain_state.json generated"
           else
-            echo "::warning::Python export failed — deploying committed fallback if present"
+            echo "::warning::Python export failed — using committed fallback if present"
           fi
 
-      - name: Sanitize + stamp build info
+      - name: Adapt state to UI schema + sanitize + stamp
         run: |
           if [ ! -f godhead-dashboard/omnibrain_state.json ]; then
             echo "::warning::no omnibrain_state.json — UI will boot on live defaults"
@@ -43,18 +43,42 @@ jobs:
             let s;
             try { s = JSON.parse(raw); }
             catch(e) { console.log('WARN unparseable — leaving untouched'); process.exit(0); }
+
+            const frac = v => (typeof v === 'number' && v > 1) ? v / 100 : v;
+
+            // reserve: fraction yieldRate + required yieldPool
+            if (s.reserve) {
+              s.reserve.yieldRate = frac(s.reserve.yieldRate);
+              if (typeof s.reserve.yieldPool !== 'number') {
+                s.reserve.yieldPool = Math.round((s.reserve.liquidAssets || 0) * (s.reserve.yieldRate || 0) * 100) / 100;
+              }
+            }
+
+            // organisms: sigil + fraction yieldRate + safe defaults
+            const sigils = { naru_atum:'◈', void_walker:'▲', matrix_syndicate:'■', genesis_prime:'★', lumen:'✦' };
+            if (Array.isArray(s.organisms)) {
+              s.organisms = s.organisms.map(o => ({
+                sigil: o.sigil || sigils[o.name] || '◈',
+                circulations: o.circulations || 0,
+                inventory: o.inventory || [],
+                ...o,
+                yieldRate: frac(o.yieldRate)
+              }));
+            }
+
             s.engines = s.engines || {};
             s.engines.omnidirectxinfinity = s.engines.omnidirectxinfinity || { status: 'ONLINE' };
             s.engines.omnivalkin = s.engines.omnivalkin || { status: 'ONLINE' };
             s.build = { commit: '${{ github.sha }}'.slice(0,8), run: '${{ github.run_number }}', timestamp: new Date().toISOString() };
+
             fs.writeFileSync(p, JSON.stringify(s, null, 2));
-            console.log('Sanitized + stamped');
+            console.log('Adapted to UI schema:', JSON.stringify(s.reserve));
           "
 
       - name: Verify dashboard files
         run: |
           ls -lh godhead-dashboard/
-          [ -f godhead-dashboard/omnibrain_state.json ] && head -c 300 godhead-dashboard/omnibrain_state.json || true
+          head -c 400 godhead-dashboard/omnibrain_state.json || true
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
