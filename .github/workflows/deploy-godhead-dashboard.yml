@@ -23,12 +23,18 @@ jobs:
 
       - name: Generate fresh omnibrain state (Python core)
         run: |
-          python3 omnibrain-core/run_godhead.py --export-only \
-            && echo "OK fresh omnibrain_state.json generated" \
-            || echo "WARN python export failed — using repo static json"
+          if python3 omnibrain-core/run_godhead.py --export-only; then
+            echo "OK — fresh omnibrain_state.json generated"
+          else
+            echo "::warning::Python export failed — deploying committed fallback if present"
+          fi
 
       - name: Sanitize + stamp build info
         run: |
+          if [ ! -f godhead-dashboard/omnibrain_state.json ]; then
+            echo "::warning::no omnibrain_state.json — UI will boot on live defaults"
+            exit 0
+          fi
           node -e "
             const fs = require('fs');
             const p = 'godhead-dashboard/omnibrain_state.json';
@@ -36,24 +42,19 @@ jobs:
             raw = raw.replace(/-Infinity/g, '-9999999').replace(/Infinity/g, '9999999').replace(/NaN/g, '0');
             let s;
             try { s = JSON.parse(raw); }
-            catch(e) { console.log('WARN state unparseable — leaving file untouched'); process.exit(0); }
+            catch(e) { console.log('WARN unparseable — leaving untouched'); process.exit(0); }
             s.engines = s.engines || {};
             s.engines.omnidirectxinfinity = s.engines.omnidirectxinfinity || { status: 'ONLINE' };
             s.engines.omnivalkin = s.engines.omnivalkin || { status: 'ONLINE' };
-            s.build = {
-              commit: '${{ github.sha }}'.slice(0,8),
-              run: '${{ github.run_number }}',
-              timestamp: new Date().toISOString()
-            };
+            s.build = { commit: '${{ github.sha }}'.slice(0,8), run: '${{ github.run_number }}', timestamp: new Date().toISOString() };
             fs.writeFileSync(p, JSON.stringify(s, null, 2));
-            console.log('Sanitized + stamped OK');
+            console.log('Sanitized + stamped');
           "
 
       - name: Verify dashboard files
         run: |
           ls -lh godhead-dashboard/
-          grep -c "Infinity\|NaN" godhead-dashboard/omnibrain_state.json && echo "STILL DIRTY" || echo "CLEAN JSON"
-          head -c 400 godhead-dashboard/omnibrain_state.json; echo
+          [ -f godhead-dashboard/omnibrain_state.json ] && head -c 300 godhead-dashboard/omnibrain_state.json || true
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
@@ -65,5 +66,4 @@ jobs:
           commit_message: "OMNISURF DEPLOY — GODHEAD LIVE"
 
       - name: Print live URL
-        run: |
-          echo "LIVE: https://fatheratum.github.io/OMNISCREATOR/"
+        run: echo "LIVE - https://fatheratum.github.io/OMNISCREATOR/"

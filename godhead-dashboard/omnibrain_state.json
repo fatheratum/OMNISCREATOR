@@ -1,0 +1,78 @@
+{
+  "godhead": "OMNIBRAIN RESERVE NEXUS",
+  "universe": "INFINITY / Naru Atum",
+  "version": "1.0.0",
+  "timestamp": "2026-07-20T23:22:16.901424",
+  "reserve": {
+    "solvencyIndex": 5673675.0,
+    "liquidAssets": 5050000.0,
+    "yieldRate": 12.35,
+    "floatVolume": 420000.0,
+    "organismsOnline": 4,
+    "reserveTotal": 5060374.0
+  },
+  "organisms": [
+    {
+      "name": "naru_atum",
+      "capital": 1350998.42,
+      "yieldRate": 12.35,
+      "state": "ACTIVE"
+    },
+    {
+      "name": "void_walker",
+      "capital": 993194.64,
+      "yieldRate": 12.35,
+      "state": "ACTIVE"
+    },
+    {
+      "name": "matrix_syndicate",
+      "capital": 725436.05,
+      "yieldRate": 12.35,
+      "state": "ACTIVE"
+    },
+    {
+      "name": "genesis_prime",
+      "capital": 1121981.56,
+      "yieldRate": 12.35,
+      "state": "ACTIVE"
+    }
+  ],
+  "domains": [
+    {
+      "label": "naru_atum",
+      "balance": 2740000.0,
+      "pendingYield": 191800.0
+    },
+    {
+      "label": "lumen",
+      "balance": 1800000.0,
+      "pendingYield": 126000.0
+    },
+    {
+      "label": "void_walker",
+      "balance": 180000.0,
+      "pendingYield": 12600.0
+    },
+    {
+      "label": "matrix_syndicate",
+      "balance": 120000.0,
+      "pendingYield": 8400.0
+    },
+    {
+      "label": "genesis_prime",
+      "balance": 210000.0,
+      "pendingYield": 14700.0
+    }
+  ],
+  "payments": [],
+  "engines": {
+    "python_core": {
+      "status": "ONLINE",
+      "source": "omnibrain-core/python/"
+    }
+  },
+  "build": {
+    "timestamp": "2026-07-20T23:22:16.901501",
+    "source": "Python Core"
+  }
+}

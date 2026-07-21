@@ -32,8 +32,9 @@ class ReserveNexus:
 
     def get_solvency_index(self) -> float:
         """SI = (LA + YP) / OO"""
-        if self.outstanding_obligations <= 0:
-            return float('inf')
+        if self.outstanding_obligations <= 1e-6:
+            yp = self.liquid_assets * self.yield_rate
+            return round(self.liquid_assets + yp, 4)  # fully solvent — no obligations
         yp = self.liquid_assets * self.yield_rate  # simplified projected yield
         return (self.liquid_assets + yp) / self.outstanding_obligations
 
