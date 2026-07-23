@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>OMNIBRAIN GODHEAD — Living Dashboard</title>
+<style>
+  :root {
+    --gold:       #FFD700;
+    --gold-dim:   #B8860B;
+    --gold-bright:#FFF4A0;
+    --cyan:       #00F5E4;
+    --pink:       #FF66CC;
+    --green:      #00FF99;
+    --red:        #FF4040;
+    --dark:       #070310;
+    --panel:      rgba(12,5,22,0.96);
+    --border:     rgba(255,215,0,0.18);
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{
+    background:var(--dark);
+    color:#E8EAF0;
+    font-family:'Courier New',monospace;
+    overflow:hidden;
+    width:100vw;height:100vh;
+  }
+
+  /* ── CANVAS (sphere + matrix) ───────────────────────── */
+  #omnibrain-canvas{
+    position:fixed;top:0;left:0;
+    width:100%;height:100%;
+    z-index:0;
+  }
+
+  /* ── TOP RESERVE NEXUS BAR ──────────────────────────── */
+  #reserve-bar{
+    position:fixed;top:0;left:0;right:0;
+    height:52px;
+    background:rgba(7,3,16,0.97);
+    border-bottom:1px solid var(--border);
+    display:flex;align-items:center;
+    padding:0 16px;gap:0;
+    z-index:100;
+    white-space:nowrap;
+    overflow:hidden;
+  }
+  .rb-title{color:var(--gold);font-size:13px;font-weight:bold;margin-right:20px;}
+  .rb-metric{
+    display:flex;flex-direction:column;
+    padding:0 14px;
+    border-right:1px solid var(--border);
+    min-width:130px;
+  }
+  .rb-metric:last-of-type{border-right:none;}
+  .rb-label{font-size:9px;color:var(--gold-dim);letter-spacing:1px;}
+  .rb-value{font-size:13px;font-weight:bold;margin-top:1px;}
+  .rb-actions{margin-left:auto;display:flex;gap:8px;}
+  .rb-btn{
+    background:rgba(255,215,0,0.08);
+    border:1px solid var(--gold-dim);
+    color:var(--gold);
+    padding:5px 12px;font-size:10px;
+    font-family:'Courier New',monospace;
+    cursor:pointer;letter-spacing:1px;
+    transition:all .15s;
+  }
+  .rb-btn:hover{background:rgba(255,215,0,0.22);border-color:var(--gold);}
+  .rb-btn:active{background:var(--gold);color:#000;}
+
+  /* ── LEFT DOMAIN PANEL ──────────────────────────────── */
+  #domain-panel{
+    position:fixed;top:52px;left:0;
+    width:252px;
+    bottom:148px;
+    background:var(--panel);
+    border-right:1px solid var(--border);
+    overflow-y:auto;
+    z-index:90;
+    padding:10px 8px;
+  }
+  .panel-title{
+    color:var(--gold);font-size:11px;
+    letter-spacing:2px;font-weight:bold;
+    margin-bottom:4px;padding:0 4px;
+  }
+  .panel-sub{color:var(--gold-dim);font-size:9px;padding:0 4px 8px;letter-spacing:1px;}
+  .domain-card{
+    background:rgba(20,8,36,0.9);
+    border:1px solid var(--border);
+    border-radius:4px;
+    padding:8px 10px;
+    margin-bottom:6px;
+    cursor:pointer;
+    transition:all .2s;
+    position:relative;overflow:hidden;
+  }
+  .domain-card:hover{border-color:var(--gold);background:rgba(30,14,50,0.95);}
+  .domain-card.burst{border-color:var(--gold-bright);box-shadow:0 0 18px rgba(255,215,0,0.4);}
+  .domain-name{color:var(--gold-bright);font-size:10px;font-weight:bold;letter-spacing:1px;}
+  .domain-bal{color:#D0D4E0;font-size:11px;margin-top:2px;}
+  .domain-yield{color:var(--green);font-size:9px;margin-top:1px;}
+  .domain-btn{
+    position:absolute;right:8px;top:50%;transform:translateY(-50%);
+    background:rgba(255,215,0,0.1);
+    border:1px solid var(--gold-dim);
+    color:var(--gold);font-size:8px;
+    font-family:'Courier New',monospace;
+    padding:3px 7px;cursor:pointer;
+    transition:all .15s;
+  }
+  .domain-btn:hover{background:rgba(255,215,0,0.25);}
+
+  /* ── RIGHT ORGANISM PANEL ───────────────────────────── */
+  #organism-panel{
+    position:fixed;top:52px;right:0;
+    width:268px;bottom:148px;
+    background:var(--panel);
+    border-left:1px solid var(--border);
+    overflow-y:auto;
+    z-index:90;
+    padding:10px 8px;
+  }
+  .organism-card{
+    background:rgba(18,7,32,0.95);
+    border:1px solid var(--border);
+    border-radius:4px;
+    padding:10px;
+    margin-bottom:8px;
+    transition:all .2s;
+  }
+  .organism-card.naru{border-color:rgba(255,215,0,0.35);}
+  .organism-card.active-pulse{box-shadow:0 0 20px rgba(255,215,0,0.25);}
+  .org-header{display:flex;align-items:center;gap:8px;margin-bottom:6px;}
+  .org-sigil{color:var(--gold);font-size:16px;}
+  .org-name{color:var(--gold-bright);font-size:11px;font-weight:bold;letter-spacing:1px;}
+  .org-state{font-size:8px;letter-spacing:1px;margin-left:auto;}
+  .org-state.ACTIVE{color:var(--green);}
+  .org-state.CIRCULATING{color:var(--gold-bright);}
+  .org-state.TRANSCENDENT{color:var(--cyan);}
+  .org-row{display:flex;justify-content:space-between;font-size:10px;margin-bottom:2px;}
+  .org-label{color:var(--gold-dim);}
+  .org-val{color:#D0D4E0;}
+  .org-inv{font-size:9px;color:var(--gold-dim);margin-top:4px;border-top:1px solid var(--border);padding-top:4px;}
+  .circulate-btn{
+    width:100%;margin-top:8px;
+    background:rgba(255,215,0,0.07);
+    border:1px solid var(--gold-dim);
+    color:var(--gold);
+    font-family:'Courier New',monospace;
+    font-size:9px;letter-spacing:1px;
+    padding:6px;cursor:pointer;
+    transition:all .2s;
+  }
+  .circulate-btn:hover{background:rgba(255,215,0,0.18);border-color:var(--gold);}
+  .circulate-btn:active{background:var(--gold);color:#000;}
+
+  /* ── BOTTOM PAYMENT FEED ────────────────────────────── */
+  #payment-feed{
+    position:fixed;bottom:0;left:0;right:0;
+    height:148px;
+    background:rgba(7,3,16,0.97);
+    border-top:1px solid var(--border);
+    z-index:100;
+    display:flex;flex-direction:column;
+    padding:8px 14px 6px;
+  }
+  .feed-title{
+    color:var(--gold);font-size:10px;letter-spacing:2px;
+    font-weight:bold;margin-bottom:4px;flex-shrink:0;
+  }
+  #payment-log{
+    flex:1;overflow-y:auto;
+    display:flex;flex-direction:column-reverse;
+  }
+  .pmt-line{
+    font-size:9px;letter-spacing:.5px;
+    padding:1px 0;white-space:nowrap;
+    animation:fadeIn .4s ease;
+  }
+  .pmt-line.complete{color:var(--green);}
+  .pmt-line.pending{color:var(--gold-dim);}
+  @keyframes fadeIn{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:translateY(0);}}
+
+  /* ── SPHERE OVERLAY ─────────────────────────────────── */
+  #sphere-overlay{
+    position:fixed;
+    top:60px;
+    left:50%;transform:translateX(-50%);
+    text-align:center;
+    z-index:50;
+    pointer-events:none;
+  }
+  .sphere-title{color:var(--gold-bright);font-size:14px;letter-spacing:4px;font-weight:bold;text-shadow:0 0 20px rgba(255,215,0,0.6);}
+  .sphere-sub{color:var(--gold);font-size:9px;letter-spacing:3px;margin-top:2px;}
+  .sphere-si{font-size:11px;margin-top:4px;letter-spacing:2px;}
+
+  /* ── NODE INSPECTOR ─────────────────────────────────── */
+  #node-inspector{
+    position:fixed;
+    top:50%;left:50%;
+    transform:translate(-50%,-50%);
+    background:rgba(10,4,20,0.97);
+    border:1px solid var(--gold);
+    padding:16px 20px;
+    min-width:320px;
+    z-index:200;
+    display:none;
+    box-shadow:0 0 40px rgba(255,215,0,0.2);
+  }
+  #node-inspector.visible{display:block;animation:fadeIn .2s ease;}
+  .insp-title{color:var(--gold-bright);font-size:12px;font-weight:bold;letter-spacing:2px;margin-bottom:10px;}
+  .insp-row{display:flex;justify-content:space-between;font-size:10px;margin-bottom:4px;}
+  .insp-key{color:var(--gold-dim);}
+  .insp-val{color:var(--cyan);}
+  .insp-close{
+    position:absolute;top:8px;right:10px;
+    color:var(--gold-dim);cursor:pointer;font-size:14px;
+  }
+  .insp-close:hover{color:var(--gold);}
+
+  /* ── OMNIBRAIN CONSOLE ──────────────────────────────── */
+  #omnibrain-console{
+    position:fixed;
+    bottom:148px;left:0;
+    width:252px;
+    height:180px;
+    background:rgba(7,3,16,0.94);
+    border-top:1px solid var(--border);
+    border-right:1px solid var(--border);
+    z-index:95;
+    display:flex;flex-direction:column;
+    padding:6px 8px;
+  }
+  .console-title{color:var(--gold);font-size:9px;letter-spacing:2px;margin-bottom:4px;flex-shrink:0;}
+  #console-log{flex:1;overflow-y:auto;display:flex;flex-direction:column-reverse;}
+  .con-line{font-size:8px;padding:1px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .con-line.gold{color:var(--gold);}
+  .con-line.green{color:var(--green);}
+  .con-line.cyan{color:var(--cyan);}
+  .con-line.dim{color:var(--gold-dim);}
+
+  /* ── SCROLLBARS ─────────────────────────────────────── */
+  ::-webkit-scrollbar{width:3px;}
+  ::-webkit-scrollbar-track{background:transparent;}
+  ::-webkit-scrollbar-thumb{background:var(--gold-dim);border-radius:2px;}
+</style>
+</head>
+<body>
+
+<canvas id="omnibrain-canvas"></canvas>
+
+<!-- TOP RESERVE NEXUS BAR -->
+<div id="reserve-bar">
+  <div class="rb-title">◈ OMNIBRAIN RESERVE NEXUS</div>
+  <div class="rb-metric">
+    <span class="rb-label">SOLVENCY INDEX</span>
+    <span class="rb-value" id="rb-si" style="color:var(--green)">1.0000</span>
+  </div>
+  <div class="rb-metric">
+    <span class="rb-label">LIQUID ASSETS</span>
+    <span class="rb-value" id="rb-la" style="color:var(--cyan)">$100,000</span>
+  </div>
+  <div class="rb-metric">
+    <span class="rb-label">YIELD RATE</span>
+    <span class="rb-value" id="rb-yr" style="color:var(--green)">7.000%</span>
+  </div>
+  <div class="rb-metric">
+    <span class="rb-label">FLOAT VOLUME</span>
+    <span class="rb-value" id="rb-fv" style="color:var(--pink)">$42,000</span>
+  </div>
+  <div class="rb-metric">
+    <span class="rb-label">ORGANISMS ONLINE</span>
+    <span class="rb-value" id="rb-oo" style="color:var(--gold-bright)">4</span>
+  </div>
+  <div class="rb-metric">
+    <span class="rb-label">RESERVE TOTAL</span>
+    <span class="rb-value" id="rb-rt" style="color:var(--gold)">$142,000</span>
+  </div>
+  <div class="rb-actions">
+    <button class="rb-btn" onclick="OMNI.tenderSolvency()">SPACE · TENDER SOLVENCY</button>
+    <button class="rb-btn" onclick="OMNI.establishPayment()">E · ESTABLISH PAYMENT</button>
+  </div>
+</div>
+
+<!-- LEFT DOMAIN PANEL -->
+<div id="domain-panel">
+  <div class="panel-title">◈ PRIVATE WALLET DOMAINS</div>
+  <div class="panel-sub">CLICK DOMAIN TO ACQUIRE DEPOSIT</div>
+  <div id="domain-list"></div>
+</div>
+
+<!-- OMNIBRAIN CONSOLE -->
+<div id="omnibrain-console">
+  <div class="console-title">◈ OMNIBRAIN CONSOLE</div>
+  <div id="console-log"></div>
+</div>
+
+<!-- SPHERE OVERLAY -->
+<div id="sphere-overlay">
+  <div class="sphere-title">◈ OMNIBRAIN ◈</div>
+  <div class="sphere-sub">HOLOGRAPHIC SPHERE · ACTIVE</div>
+  <div class="sphere-si" id="sphere-si-readout">SI = 1.0000 · GLOW = 1.00</div>
+</div>
+
+<!-- RIGHT ORGANISM PANEL -->
+<div id="organism-panel">
+  <div class="panel-title">◈ ECONOMIC ORGANISMS</div>
+  <div class="panel-sub">CIRCULATE · EXECUTE PATH</div>
+  <div id="organism-list"></div>
+</div>
+
+<!-- BOTTOM PAYMENT FEED -->
+<div id="payment-feed">
+  <div class="feed-title">◈ PAYMENT ESTABLISHMENT & YIELD DISTRIBUTION FEED — ATOMIC SETTLEMENT CONFIRMATIONS</div>
+  <div id="payment-log"></div>
+</div>
+
+<!-- NODE INSPECTOR -->
+<div id="node-inspector">
+  <span class="insp-close" onclick="OMNI.closeInspector()">✕</span>
+  <div class="insp-title" id="insp-title">NODE INSPECTOR</div>
+  <div id="insp-body"></div>
+</div>
+
+<script src="omnisurf.js"></script>
+</body>
+</html>
